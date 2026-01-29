@@ -548,13 +548,30 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       {
         name: "get_notebook_content",
         description:
-          "Get all cells from a notebook. Returns cell index, type, source code, and outputs.",
+          "Get cells from a notebook. By default returns only source code (no outputs) to save context. Use include_outputs=true only when you need to see execution results. Use cell_type='code' to skip markdown cells.",
         inputSchema: {
           type: "object",
           properties: {
             path: {
               type: "string",
               description: "Notebook path (e.g., 'notebook1.ipynb')",
+            },
+            cell_type: {
+              type: "string",
+              enum: ["all", "code", "markdown"],
+              description: "Filter by cell type. Use 'code' for quick context without markdown prose. Default: 'all'",
+            },
+            include_outputs: {
+              type: "boolean",
+              description: "Include cell outputs (stdout, results, images). WARNING: Can be very large with rich outputs like plots/dataframes. Default: false",
+            },
+            start_index: {
+              type: "number",
+              description: "Start from this cell index. Default: 0",
+            },
+            end_index: {
+              type: "number",
+              description: "End at this cell index (exclusive). Default: end of notebook",
             },
           },
           required: ["path"],
@@ -731,29 +748,80 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case "get_notebook_content": {
-        const { path } = args as { path: string };
+        const {
+          path,
+          cell_type = "all",
+          include_outputs = false,
+          start_index = 0,
+          end_index,
+        } = args as {
+          path: string;
+          cell_type?: "all" | "code" | "markdown";
+          include_outputs?: boolean;
+          start_index?: number;
+          end_index?: number;
+        };
+
         const sessions = await listNotebookSessions();
         const session = sessions.find((s) => s.path === path);
 
         const { doc } = await connectToNotebook(path, session?.kernelId);
         const cells = doc.getArray("cells");
 
+        const endIdx = end_index ?? cells.length;
         const content = [];
-        for (let i = 0; i < cells.length; i++) {
+
+        for (let i = start_index; i < endIdx && i < cells.length; i++) {
           const cell = cells.get(i) as any;
-          content.push({
+          const type = getCellType(cell);
+
+          // Filter by cell type
+          if (cell_type !== "all" && type !== cell_type) {
+            continue;
+          }
+
+          const cellData: any = {
             index: i,
-            id: getCellId(cell),
-            type: getCellType(cell),
+            type,
             source: extractSource(cell),
-          });
+          };
+
+          // Include outputs only if requested (and for code cells only)
+          if (include_outputs && type === "code") {
+            const outputs = cell instanceof Y.Map ? cell.get("outputs") : cell?.outputs;
+            if (outputs) {
+              // Convert Y.Array to JSON if needed
+              const outputsJson = outputs instanceof Y.Array ? outputs.toJSON() : outputs;
+              // Summarize large outputs
+              cellData.outputs = outputsJson.map((out: any) => {
+                // For display_data/execute_result, only include text/plain by default
+                if (out.data && (out.output_type === "display_data" || out.output_type === "execute_result")) {
+                  return {
+                    output_type: out.output_type,
+                    text: out.data["text/plain"] || "[rich output - image/html]",
+                    has_image: !!out.data["image/png"] || !!out.data["image/jpeg"],
+                    has_html: !!out.data["text/html"],
+                  };
+                }
+                return out;
+              });
+            }
+            cellData.execution_count = cell instanceof Y.Map ? cell.get("execution_count") : cell?.execution_count;
+          }
+
+          content.push(cellData);
         }
+
+        // Add summary header
+        const totalCells = cells.length;
+        const returnedCells = content.length;
+        const summary = `Notebook: ${path} (${totalCells} total cells, returning ${returnedCells}${cell_type !== "all" ? ` ${cell_type} cells` : ""}${include_outputs ? " with outputs" : ""})`;
 
         return {
           content: [
             {
               type: "text",
-              text: JSON.stringify(content, null, 2),
+              text: `${summary}\n\n${JSON.stringify(content, null, 2)}`,
             },
           ],
         };
