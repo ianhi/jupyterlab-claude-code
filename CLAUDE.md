@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-A TypeScript MCP server that connects to JupyterLab's real-time collaboration system, allowing Claude Code to read and edit notebooks in real-time.
+A TypeScript MCP server that connects to JupyterLab's real-time collaboration system, allowing Claude Code to read, edit, and execute notebooks in real-time. Changes sync bidirectionally with the JupyterLab browser interface.
 
 ## Architecture
 
@@ -20,16 +20,29 @@ src/
 |------|-------------|
 | `connect_jupyter` | Connect to JupyterLab with URL (call first!) |
 | `list_notebooks` | List open notebooks with active kernels |
-| `get_notebook_content` | Get all cells (index, type, source) |
+| `get_notebook_content` | Get cells with filtering (code only by default) |
 | `insert_cell` | Insert a new cell at position |
 | `update_cell` | Update cell source code |
 | `delete_cell` | Delete a cell |
+| `get_user_focus` | See user's current cell via awareness |
 | `execute_cell` | Execute a cell, show outputs in JupyterLab |
 | `execute_code` | Execute code (optionally as new cell with outputs) |
 
+### Context-Efficient Reading
+
+`get_notebook_content` has options to reduce context usage:
+
+```
+cell_type: "code" (default), "markdown", or "all"
+include_outputs: false (default) - set true only when needed
+start_index / end_index: read specific cell ranges
+```
+
+**Best practice**: The default `cell_type="code"` skips markdown cells, keeping context focused on executable code.
+
 ## Claude Code Configuration
 
-Add to `~/.claude/mcp.json`:
+**Option 1: Project-local config** (`.mcp.json` in project root):
 
 ```json
 {
@@ -42,6 +55,21 @@ Add to `~/.claude/mcp.json`:
 }
 ```
 
+**Option 2: Global config** (`~/.claude.json`):
+
+```json
+{
+  "mcpServers": {
+    "jupyter": {
+      "type": "stdio",
+      "command": "jupyter-mcp",
+      "args": [],
+      "env": {}
+    }
+  }
+}
+```
+
 No token needed in config! Just paste your JupyterLab URL to Claude:
 > "Connect to http://localhost:8888/lab?token=abc123"
 
@@ -49,7 +77,7 @@ No token needed in config! Just paste your JupyterLab URL to Claude:
 
 - **TypeScript** with `tsx` for development
 - **@modelcontextprotocol/sdk** for MCP server
-- **y-websocket** for Yjs sync (same as JupyterLab frontend)
+- **y-websocket** for Yjs sync (same protocol as JupyterLab frontend)
 - **yjs** for CRDT data structures
 
 ## Development
@@ -85,15 +113,21 @@ npm run watch
 4. Wait for y-websocket `sync` event
 5. Access `doc.getArray("cells")` for notebook content
 
-## Environment Variables
+## Awareness / Collaboration
 
-- `JUPYTER_HOST` - Hostname (default: localhost)
-- `JUPYTER_PORT` - Port (default: 8888)
-- `JUPYTER_TOKEN` - Auth token (required)
+Claude appears as "Claude Code" in JupyterLab's collaborators panel with:
+- Username: `claude-code`
+- Display name: `Claude Code`
+- Initials: `CC`
+- Color: `#ff6b6b` (coral red)
+
+The `get_user_focus` tool uses JupyterLab's awareness protocol to see which cell the user is currently editing.
 
 ## Important Notes
 
 - Always request a session before connecting to the room
 - The `sessionId` must be passed as a query parameter
 - Room ID format: `{format}:{type}:{fileId}` (e.g., `json:notebook:abc-123`)
-- Cells are in `doc.getArray("cells")` as Y.Map objects
+- Don't URL-encode the room ID (colons must remain as-is)
+- Cells are in `doc.getArray("cells")` as Y.Map objects with Y.Text for source
+- Outputs from execution appear immediately in the browser
