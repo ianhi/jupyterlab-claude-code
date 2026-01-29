@@ -64,7 +64,7 @@ def _cleanup_connection_file():
     """Remove connection file on shutdown."""
     global _connection_file
     if _connection_file and _connection_file.exists():
-        with contextlib.suppress(Exception):
+        with contextlib.suppress(OSError):
             _connection_file.unlink()
 
 

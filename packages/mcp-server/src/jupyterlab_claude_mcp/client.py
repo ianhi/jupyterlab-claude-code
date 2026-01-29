@@ -405,7 +405,7 @@ class JupyterLabClient:
             self._reconnect_task = None
 
         if self._connection:
-            with contextlib.suppress(Exception):
+            with contextlib.suppress(WebSocketException, OSError):
                 await self._connection.close()
             self._connection = None
 
