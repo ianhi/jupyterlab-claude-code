@@ -33,18 +33,18 @@ class ClaudeCodeWebSocketHandler(WebSocketHandler, JupyterHandler):
         logger.info("Claude Code MCP client connected")
         self.write_message(json.dumps({"type": "connected", "status": "ok"}))
 
-    def on_message(self, message: str | bytes) -> None:
+    async def on_message(self, message: str | bytes) -> None:
         """Handle incoming messages from MCP server."""
         try:
             data = json.loads(message)
-            self._handle_request(data)
+            await self._handle_request(data)
         except json.JSONDecodeError:
             self._send_error("Invalid JSON")
         except Exception as e:
             logger.exception("Error handling message")
             self._send_error(str(e))
 
-    def _handle_request(self, data: dict[str, Any]) -> None:
+    async def _handle_request(self, data: dict[str, Any]) -> None:
         """Route requests to appropriate handlers."""
         request_id = data.get("id", str(uuid.uuid4()))
         action = data.get("action")
@@ -86,7 +86,7 @@ class ClaudeCodeWebSocketHandler(WebSocketHandler, JupyterHandler):
             return
 
         try:
-            result = handler(data.get("params", {}), data.get("notebook_id"))
+            result = await handler(data.get("params", {}), data.get("notebook_id"))
             self._send_response(request_id, result)
         except Exception as e:
             logger.exception(f"Error executing {action}")
