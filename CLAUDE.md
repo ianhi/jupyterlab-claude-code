@@ -58,37 +58,13 @@ case_sensitive: false (default)
 
 Returns matching cells with their source and/or output text. Useful for finding errors, tracebacks, or specific values.
 
-## Claude Code Configuration
+## Installation
 
-**Option 1: Project-local config** (`.mcp.json` in project root):
-
-```json
-{
-  "mcpServers": {
-    "jupyter": {
-      "command": "npx",
-      "args": ["tsx", "/path/to/jupyterlab-claude-code/src/index.ts"]
-    }
-  }
-}
+```bash
+claude mcp add jupyter -- npx jupyterlab-claude-code
 ```
 
-**Option 2: Global config** (`~/.claude.json`):
-
-```json
-{
-  "mcpServers": {
-    "jupyter": {
-      "type": "stdio",
-      "command": "jupyter-mcp",
-      "args": [],
-      "env": {}
-    }
-  }
-}
-```
-
-No token needed in config! Just paste your JupyterLab URL to Claude:
+No token in config - just paste your JupyterLab URL when connecting:
 > "Connect to http://localhost:8888/lab?token=abc123"
 
 ## Key Technologies
