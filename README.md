@@ -101,6 +101,23 @@ npm run build
 npm run watch
 ```
 
+## Related Projects
+
+This project was developed independently before we discovered [datalayer/jupyter-mcp-server](https://github.com/datalayer/jupyter-mcp-server), which solves the same problem.
+
+**Why keep both?** This project offers:
+- **Simpler setup**: One command install, just paste your JupyterLab URL
+- **`search_notebook`**: Grep through source code and outputs with regex
+- **`get_user_focus`**: See which cell the user is editing (cursor awareness)
+- **TypeScript/npm**: If you prefer the Node.js ecosystem
+
+**Consider jupyter-mcp-server if you need:**
+- Streamable HTTP transport (multi-client, production deployments)
+- File browsing, kernel management, streaming execution
+- Python ecosystem
+
+See [COMPARISON.md](COMPARISON.md) for detailed differences.
+
 ## License
 
 MIT
