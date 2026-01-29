@@ -559,7 +559,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             cell_type: {
               type: "string",
               enum: ["all", "code", "markdown"],
-              description: "Filter by cell type. Use 'code' for quick context without markdown prose (Recommended). Default: 'all'",
+              description: "Filter by cell type: 'code' for just code (Recommended for quick context), 'markdown' for documentation/prose only. Default: 'all'",
             },
             include_outputs: {
               type: "boolean",
