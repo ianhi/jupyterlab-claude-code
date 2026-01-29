@@ -1,4 +1,4 @@
-#!/usr/bin/env npx tsx
+#!/usr/bin/env node
 /**
  * MCP Server for JupyterLab notebook collaboration.
  *
@@ -785,7 +785,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
         // Show what was inserted
         const insertDiff = [
-          `--- ${path}:cell[${insertIndex}] (new ${cell_type} cell)`,
+          `--- /dev/null`,
           `+++ ${path}:cell[${insertIndex}]`,
           `@@ -0,0 +1,${source.split("\n").length} @@`,
           ...source.split("\n").map((line) => `+${line}`),
@@ -795,7 +795,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           content: [
             {
               type: "text",
-              text: insertDiff,
+              text: `Inserted ${cell_type} cell at index ${insertIndex} in ${path}\n\n\`\`\`diff\n${insertDiff}\n\`\`\``,
             },
           ],
         };
@@ -835,7 +835,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           }
         }
 
-        // Generate unified diff
+        // Generate unified diff wrapped in markdown for better rendering
         const diff = generateUnifiedDiff(
           oldSource,
           source,
@@ -846,7 +846,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           content: [
             {
               type: "text",
-              text: diff,
+              text: `Updated cell ${index} in ${path}\n\n\`\`\`diff\n${diff}\n\`\`\``,
             },
           ],
         };
@@ -876,7 +876,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
         // Show what was deleted
         const deleteDiff = [
-          `--- ${path}:cell[${index}] (deleted ${cellType} cell)`,
+          `--- ${path}:cell[${index}]`,
           `+++ /dev/null`,
           `@@ -1,${oldSource.split("\n").length} +0,0 @@`,
           ...oldSource.split("\n").map((line) => `-${line}`),
@@ -886,7 +886,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           content: [
             {
               type: "text",
-              text: deleteDiff,
+              text: `Deleted ${cellType} cell at index ${index} in ${path}\n\n\`\`\`diff\n${deleteDiff}\n\`\`\``,
             },
           ],
         };
