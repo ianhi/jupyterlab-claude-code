@@ -27,6 +27,7 @@ src/
 | `search_notebook` | Grep through source code and outputs |
 | `insert_cell` | Insert a new cell at position |
 | `update_cell` | Update cell source code |
+| `update_and_execute` | Update a cell and run it in one operation |
 | `delete_cell` | Delete a cell |
 | `get_user_focus` | See user's current cell via awareness |
 | `execute_cell` | Execute a cell, show outputs in JupyterLab |

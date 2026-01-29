@@ -709,6 +709,29 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         },
       },
       {
+        name: "update_and_execute",
+        description:
+          "Update a cell's source code and immediately execute it. Combines update_cell + execute_cell in one operation. Returns the execution output.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: {
+              type: "string",
+              description: "Notebook path",
+            },
+            index: {
+              type: "number",
+              description: "Cell index to update and execute",
+            },
+            source: {
+              type: "string",
+              description: "New source code for the cell",
+            },
+          },
+          required: ["path", "index", "source"],
+        },
+      },
+      {
         name: "search_notebook",
         description:
           "Search/grep through notebook cells for a pattern (regex supported). Returns matching cells with source code and/or outputs. Useful for finding errors, tracebacks, variable usage, or specific text.",
@@ -1297,6 +1320,76 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
           return { content };
         }
+      }
+
+      case "update_and_execute": {
+        const { path, index, source } = args as {
+          path: string;
+          index: number;
+          source: string;
+        };
+
+        const sessions = await listNotebookSessions();
+        const session = sessions.find((s) => s.path === path);
+
+        if (!session?.kernelId) {
+          throw new Error(
+            `No kernel found for notebook '${path}'. Make sure the notebook has an active kernel.`
+          );
+        }
+
+        const { doc } = await connectToNotebook(path, session.kernelId);
+        const cells = doc.getArray("cells");
+
+        if (index < 0 || index >= cells.length) {
+          throw new Error(
+            `Invalid cell index ${index}. Notebook has ${cells.length} cells.`
+          );
+        }
+
+        const cell = cells.get(index) as Y.Map<any>;
+
+        // Update the cell source
+        const oldSource = extractSource(cell);
+        if (cell instanceof Y.Map) {
+          const sourceField = cell.get("source");
+          if (sourceField instanceof Y.Text) {
+            sourceField.delete(0, sourceField.length);
+            sourceField.insert(0, source);
+          } else {
+            cell.set("source", new Y.Text(source));
+          }
+        }
+
+        // Execute the cell
+        const result = await executeCode(session.kernelId, source);
+
+        // Update cell outputs in the notebook
+        if (cell instanceof Y.Map) {
+          updateCellOutputs(cell, result);
+        }
+
+        // Generate diff
+        const diff = generateUnifiedDiff(oldSource, source, `${path}:cell[${index}]`);
+
+        // Build response
+        const content: any[] = [
+          {
+            type: "text",
+            text: `Updated and executed cell ${index} in ${path}\n\n\`\`\`diff\n${diff}\n\`\`\`\n\nOutput:\n${result.text || "(no output)"}`,
+          },
+        ];
+
+        // Add images
+        for (const img of result.images) {
+          content.push({
+            type: "image",
+            data: img.data,
+            mimeType: img.mimeType,
+          });
+        }
+
+        return { content };
       }
 
       case "search_notebook": {
