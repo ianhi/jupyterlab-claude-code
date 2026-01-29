@@ -647,6 +647,21 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         },
       },
       {
+        name: "get_user_focus",
+        description:
+          "Get the cell the user is currently focused on via JupyterLab's awareness protocol. Returns cursor positions and active cell index.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: {
+              type: "string",
+              description: "Notebook path",
+            },
+          },
+          required: ["path"],
+        },
+      },
+      {
         name: "execute_cell",
         description:
           "Execute a cell in the notebook and show outputs in JupyterLab. Returns the output to Claude as well.",
@@ -960,6 +975,65 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             {
               type: "text",
               text: `Deleted ${cellType} cell at index ${index} in ${path}\n\n\`\`\`diff\n${deleteDiff}\n\`\`\``,
+            },
+          ],
+        };
+      }
+
+      case "get_user_focus": {
+        const { path } = args as { path: string };
+
+        const sessions = await listNotebookSessions();
+        const session = sessions.find((s) => s.path === path);
+
+        const { provider } = await connectToNotebook(path, session?.kernelId);
+        const awareness = provider.awareness;
+
+        // Get all awareness states (including our own and the user's)
+        const states = awareness.getStates();
+        const myClientId = awareness.clientID;
+
+        const collaborators: any[] = [];
+        states.forEach((state: any, clientId: number) => {
+          if (clientId === myClientId) return; // Skip ourselves
+
+          const info: any = {
+            clientId,
+            user: state.user?.display_name || state.user?.name || "Unknown",
+          };
+
+          // Check for cursor info
+          if (state.cursors && state.cursors.length > 0) {
+            info.cursors = state.cursors.map((c: any) => ({
+              head: c.head,
+              anchor: c.anchor,
+            }));
+          }
+
+          // Check for current document
+          if (state.current) {
+            info.current = state.current;
+          }
+
+          collaborators.push(info);
+        });
+
+        if (collaborators.length === 0) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `No other collaborators found in ${path}. Make sure the notebook is open in JupyterLab.`,
+              },
+            ],
+          };
+        }
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Collaborators in ${path}:\n${JSON.stringify(collaborators, null, 2)}`,
             },
           ],
         };
