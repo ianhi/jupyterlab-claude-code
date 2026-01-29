@@ -45,7 +45,10 @@ No token in config - just paste your JupyterLab URL when connecting.
 | Tool | Description |
 |------|-------------|
 | `connect_jupyter` | Connect to JupyterLab (call first with URL) |
+| `list_files` | List files/notebooks in a directory |
 | `list_notebooks` | List open notebooks with active kernels |
+| `open_notebook` | Open a notebook and start its kernel |
+| `create_notebook` | Create a new notebook file |
 | `get_notebook_content` | Get cells with filtering options |
 | `search_notebook` | Search/grep through source code and outputs |
 | `insert_cell` | Insert a new cell at position |

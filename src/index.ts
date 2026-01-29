@@ -736,6 +736,62 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           required: ["path", "pattern"],
         },
       },
+      {
+        name: "list_files",
+        description:
+          "List files and directories in the Jupyter file system. Use to discover available notebooks.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: {
+              type: "string",
+              description: "Directory path to list. Default: '' (root)",
+            },
+          },
+        },
+      },
+      {
+        name: "open_notebook",
+        description:
+          "Open a notebook in JupyterLab and start a kernel. The notebook will appear in the browser and be ready for editing/execution.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: {
+              type: "string",
+              description: "Notebook path (e.g., 'analysis.ipynb' or 'projects/notebook.ipynb')",
+            },
+            kernel_name: {
+              type: "string",
+              description: "Kernel to use (e.g., 'python3'). Default: notebook's default kernel",
+            },
+          },
+          required: ["path"],
+        },
+      },
+      {
+        name: "create_notebook",
+        description:
+          "Create a new notebook file. Optionally open it immediately with a kernel.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: {
+              type: "string",
+              description: "Path for new notebook (e.g., 'new_analysis.ipynb')",
+            },
+            kernel_name: {
+              type: "string",
+              description: "Kernel to use (e.g., 'python3'). Default: 'python3'",
+            },
+            open: {
+              type: "boolean",
+              description: "Open the notebook after creation. Default: true",
+            },
+          },
+          required: ["path"],
+        },
+      },
     ],
   };
 });
@@ -1340,6 +1396,184 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               text: matches.length > 0
                 ? `${summary}\n\n${JSON.stringify(matches, null, 2)}`
                 : `${summary}`,
+            },
+          ],
+        };
+      }
+
+      case "list_files": {
+        const { path = "" } = args as { path?: string };
+
+        const response = await apiFetch(`/api/contents/${encodeURIComponent(path)}`);
+        if (!response.ok) {
+          throw new Error(`Failed to list files: ${response.statusText}`);
+        }
+
+        const data = await response.json();
+
+        if (data.type !== "directory") {
+          // Single file info
+          return {
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify({
+                  name: data.name,
+                  path: data.path,
+                  type: data.type,
+                  size: data.size,
+                  last_modified: data.last_modified,
+                }, null, 2),
+              },
+            ],
+          };
+        }
+
+        // Directory listing
+        const items = data.content.map((item: any) => ({
+          name: item.name,
+          type: item.type,
+          path: item.path,
+          ...(item.type === "notebook" ? { kernel: item.kernel_name } : {}),
+        }));
+
+        // Sort: directories first, then notebooks, then other files
+        items.sort((a: any, b: any) => {
+          const typeOrder: Record<string, number> = { directory: 0, notebook: 1, file: 2 };
+          const aOrder = typeOrder[a.type] ?? 3;
+          const bOrder = typeOrder[b.type] ?? 3;
+          if (aOrder !== bOrder) return aOrder - bOrder;
+          return a.name.localeCompare(b.name);
+        });
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Files in ${path || "/"}:\n\n${JSON.stringify(items, null, 2)}`,
+            },
+          ],
+        };
+      }
+
+      case "open_notebook": {
+        const { path, kernel_name } = args as { path: string; kernel_name?: string };
+
+        // Check if notebook exists
+        const checkResponse = await apiFetch(`/api/contents/${encodeURIComponent(path)}`);
+        if (!checkResponse.ok) {
+          throw new Error(`Notebook not found: ${path}`);
+        }
+
+        // Check if already open
+        const existingSessions = await listNotebookSessions();
+        const existing = existingSessions.find((s) => s.path === path);
+        if (existing) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `Notebook already open: ${path} (kernel: ${existing.kernelId || "none"})`,
+              },
+            ],
+          };
+        }
+
+        // Create a new session (opens notebook with kernel)
+        const sessionResponse = await apiFetch("/api/sessions", {
+          method: "POST",
+          body: JSON.stringify({
+            path,
+            type: "notebook",
+            kernel: kernel_name ? { name: kernel_name } : undefined,
+          }),
+        });
+
+        if (!sessionResponse.ok) {
+          const error = await sessionResponse.text();
+          throw new Error(`Failed to open notebook: ${error}`);
+        }
+
+        const session = await sessionResponse.json();
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Opened notebook: ${path}\nKernel: ${session.kernel?.name || "none"} (${session.kernel?.id || "no id"})`,
+            },
+          ],
+        };
+      }
+
+      case "create_notebook": {
+        const { path, kernel_name = "python3", open = true } = args as {
+          path: string;
+          kernel_name?: string;
+          open?: boolean;
+        };
+
+        // Ensure path ends with .ipynb
+        const nbPath = path.endsWith(".ipynb") ? path : `${path}.ipynb`;
+
+        // Check if file already exists
+        const checkResponse = await apiFetch(`/api/contents/${encodeURIComponent(nbPath)}`);
+        if (checkResponse.ok) {
+          throw new Error(`File already exists: ${nbPath}`);
+        }
+
+        // Create empty notebook structure
+        const emptyNotebook = {
+          cells: [],
+          metadata: {
+            kernelspec: {
+              display_name: kernel_name === "python3" ? "Python 3" : kernel_name,
+              language: "python",
+              name: kernel_name,
+            },
+          },
+          nbformat: 4,
+          nbformat_minor: 5,
+        };
+
+        // Create the notebook file
+        const createResponse = await apiFetch(`/api/contents/${encodeURIComponent(nbPath)}`, {
+          method: "PUT",
+          body: JSON.stringify({
+            type: "notebook",
+            content: emptyNotebook,
+          }),
+        });
+
+        if (!createResponse.ok) {
+          const error = await createResponse.text();
+          throw new Error(`Failed to create notebook: ${error}`);
+        }
+
+        let result = `Created notebook: ${nbPath}`;
+
+        // Optionally open it
+        if (open) {
+          const sessionResponse = await apiFetch("/api/sessions", {
+            method: "POST",
+            body: JSON.stringify({
+              path: nbPath,
+              type: "notebook",
+              kernel: { name: kernel_name },
+            }),
+          });
+
+          if (sessionResponse.ok) {
+            const session = await sessionResponse.json();
+            result += `\nOpened with kernel: ${session.kernel?.name || kernel_name}`;
+          }
+        }
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: result,
             },
           ],
         };

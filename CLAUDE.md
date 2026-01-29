@@ -19,7 +19,10 @@ src/
 | Tool | Description |
 |------|-------------|
 | `connect_jupyter` | Connect to JupyterLab with URL (call first!) |
+| `list_files` | List files/notebooks in a directory |
 | `list_notebooks` | List open notebooks with active kernels |
+| `open_notebook` | Open a notebook and start its kernel |
+| `create_notebook` | Create a new notebook file |
 | `get_notebook_content` | Get cells with filtering (code only by default) |
 | `search_notebook` | Grep through source code and outputs |
 | `insert_cell` | Insert a new cell at position |

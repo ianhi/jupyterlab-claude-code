@@ -7,13 +7,14 @@ This document compares our implementation with the existing [datalayer/jupyter-m
 | Aspect | Ours (jupyterlab-claude-code) | Theirs (jupyter-mcp-server) |
 |--------|-------------------------------|------------------------------|
 | Language | TypeScript | Python |
-| Install | `claude mcp add jupyter -- npx ...` | `pip install` + config |
+| Install | `git clone` + `npm install` | `pip install` + config |
 | Transport | stdio only | stdio + Streamable HTTP |
 | Connection | Paste JupyterLab URL with token | Separate env vars for URL/token |
 | Search | `search_notebook` with regex | Not implemented |
 | Awareness | `get_user_focus` (cursor tracking) | Not implemented |
 | Multi-notebook | Implicit (by path) | Explicit `use_notebook`/`unuse_notebook` |
-| File browser | No | `list_files` |
+| File browser | `list_files` | `list_files` |
+| Open/create notebooks | `open_notebook`, `create_notebook` | Similar |
 | Kernel management | No | `list_kernels`, `restart_notebook` |
 | Output filtering | `output_format`, `cell_type` | `response_format` (brief/detailed) |
 | Streaming execution | No | Yes (`stream` flag) |
@@ -85,11 +86,9 @@ They have `response_format` (brief/detailed) but less granular control.
 - Better for team/production deployments
 - Survives client disconnects
 
-### 2. More Tools
-- `list_files` - Browse Jupyter file system
+### 2. More Kernel Tools
 - `list_kernels` - See available kernels
 - `restart_notebook` - Restart kernel without reconnecting
-- `use_notebook`/`unuse_notebook` - Explicit notebook management
 
 ### 3. Streaming Execution
 ```python
