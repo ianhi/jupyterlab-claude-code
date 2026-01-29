@@ -1,0 +1,17 @@
+{
+  "name": "jupyterlab-claude-code-monorepo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "JupyterLab + Claude Code integration via MCP",
+  "workspaces": [
+    "packages/labextension"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces",
+    "clean": "npm run clean --workspaces",
+    "watch": "npm run watch --workspace=packages/labextension"
+  },
+  "devDependencies": {
+    "typescript": "~5.3.3"
+  }
+}
