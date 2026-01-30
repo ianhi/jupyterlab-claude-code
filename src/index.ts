@@ -698,7 +698,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       {
         name: "search_notebook",
         description:
-          "Search/grep through notebook cells for a pattern (regex supported). Returns matching cells with source code and/or outputs. Useful for finding errors, tracebacks, variable usage, or specific text.",
+          "Search/grep through notebook cells for a pattern (regex supported). Returns matching cell indices and content. Use to find cell indices before update_cell or add_cell_tags.",
         inputSchema: {
           type: "object",
           properties: {
@@ -1050,7 +1050,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       {
         name: "get_cell_metadata",
         description:
-          "Get metadata from one or more cells, including tags. Supports ranges or specific non-contiguous indices.",
+          "Get metadata from one or more cells. Returns {index, metadata, tags} - tags extracted to top level for convenience. Use indices:[2,5,8] for non-contiguous cells.",
         inputSchema: {
           type: "object",
           properties: {
@@ -1110,7 +1110,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       {
         name: "add_cell_tags",
         description:
-          "Add tags to one or more cells. Common tags: 'hide-input', 'hide-output', 'remove-input', 'remove-output', 'remove-cell', 'skip-execution', 'parameters' (papermill). Supports non-contiguous indices.",
+          "Add tags to one or more cells. Common tags: 'hide-input', 'hide-output', 'remove-input', 'remove-output', 'remove-cell', 'skip-execution', 'parameters' (papermill). Use indices:[2,5,8] for non-contiguous cells.",
         inputSchema: {
           type: "object",
           properties: {
@@ -1274,7 +1274,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       {
         name: "diff_notebooks",
         description:
-          "Compare two .ipynb notebooks cell by cell, showing differences in source code and cell types. Both must be open in JupyterLab.",
+          "Compare two .ipynb notebooks cell by cell. Both must be open in JupyterLab. Use summary_only=true for counts only.",
         inputSchema: {
           type: "object",
           properties: {
@@ -1289,6 +1289,14 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             include_outputs: {
               type: "boolean",
               description: "Include output differences (default: false)",
+            },
+            summary_only: {
+              type: "boolean",
+              description: "Only show counts, not full diffs (default: false)",
+            },
+            max_diffs: {
+              type: "number",
+              description: "Max number of cell diffs to show (default: all)",
             },
           },
           required: ["path1", "path2"],
@@ -2936,10 +2944,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case "diff_notebooks": {
-        const { path1, path2, include_outputs } = args as {
+        const { path1, path2, include_outputs, summary_only, max_diffs } = args as {
           path1: string;
           path2: string;
           include_outputs?: boolean;
+          summary_only?: boolean;
+          max_diffs?: number;
         };
 
         const sessions = await listNotebookSessions();
@@ -2953,11 +2963,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const cells2 = doc2.getArray("cells");
 
         const diffs: string[] = [];
-
-        // Compare cell counts
-        if (cells1.length !== cells2.length) {
-          diffs.push(`Cell count: ${path1} has ${cells1.length} cells, ${path2} has ${cells2.length} cells`);
-        }
+        let sourceDiffs = 0;
+        let typeDiffs = 0;
+        let outputDiffs = 0;
+        let onlyIn1 = 0;
+        let onlyIn2 = 0;
 
         // Compare cells
         const maxCells = Math.max(cells1.length, cells2.length);
@@ -2966,26 +2976,38 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           const cell2 = i < cells2.length ? (cells2.get(i) as Y.Map<any>) : null;
 
           if (!cell1) {
-            diffs.push(`[${i}] Only in ${path2}: ${getCellType(cell2)} cell`);
+            onlyIn2++;
+            if (!summary_only && (!max_diffs || diffs.length < max_diffs)) {
+              diffs.push(`[${i}] Only in ${path2}: ${getCellType(cell2)} cell`);
+            }
             continue;
           }
           if (!cell2) {
-            diffs.push(`[${i}] Only in ${path1}: ${getCellType(cell1)} cell`);
+            onlyIn1++;
+            if (!summary_only && (!max_diffs || diffs.length < max_diffs)) {
+              diffs.push(`[${i}] Only in ${path1}: ${getCellType(cell1)} cell`);
+            }
             continue;
           }
 
           const type1 = getCellType(cell1);
           const type2 = getCellType(cell2);
           if (type1 !== type2) {
-            diffs.push(`[${i}] Type differs: ${type1} vs ${type2}`);
+            typeDiffs++;
+            if (!summary_only && (!max_diffs || diffs.length < max_diffs)) {
+              diffs.push(`[${i}] Type differs: ${type1} vs ${type2}`);
+            }
           }
 
           const source1 = extractSource(cell1);
           const source2 = extractSource(cell2);
           if (source1 !== source2) {
-            const preview1 = source1.slice(0, 50).replace(/\n/g, "\\n");
-            const preview2 = source2.slice(0, 50).replace(/\n/g, "\\n");
-            diffs.push(`[${i}] Source differs:\n  ${path1}: "${preview1}..."\n  ${path2}: "${preview2}..."`);
+            sourceDiffs++;
+            if (!summary_only && (!max_diffs || diffs.length < max_diffs)) {
+              const preview1 = source1.slice(0, 50).replace(/\n/g, "\\n");
+              const preview2 = source2.slice(0, 50).replace(/\n/g, "\\n");
+              diffs.push(`[${i}] Source differs:\n  ${path1}: "${preview1}..."\n  ${path2}: "${preview2}..."`);
+            }
           }
 
           if (include_outputs && type1 === "code") {
@@ -2994,18 +3016,32 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             const out1Json = outputs1 instanceof Y.Array ? JSON.stringify(outputs1.toJSON()) : "[]";
             const out2Json = outputs2 instanceof Y.Array ? JSON.stringify(outputs2.toJSON()) : "[]";
             if (out1Json !== out2Json) {
-              diffs.push(`[${i}] Outputs differ`);
+              outputDiffs++;
+              if (!summary_only && (!max_diffs || diffs.length < max_diffs)) {
+                diffs.push(`[${i}] Outputs differ`);
+              }
             }
           }
+        }
+
+        const totalDiffs = sourceDiffs + typeDiffs + outputDiffs + onlyIn1 + onlyIn2;
+        const summary = `Summary: ${totalDiffs} differences (${sourceDiffs} source, ${typeDiffs} type, ${outputDiffs} output, ${onlyIn1} only in ${path1}, ${onlyIn2} only in ${path2})`;
+
+        let resultText: string;
+        if (totalDiffs === 0) {
+          resultText = `Notebooks ${path1} and ${path2} are identical`;
+        } else if (summary_only) {
+          resultText = summary;
+        } else {
+          const shownDiffs = max_diffs && diffs.length >= max_diffs ? `\n\n(showing first ${max_diffs} of ${totalDiffs} differences)` : "";
+          resultText = `${summary}\n\n${diffs.join("\n\n")}${shownDiffs}`;
         }
 
         return {
           content: [
             {
               type: "text",
-              text: diffs.length === 0
-                ? `Notebooks ${path1} and ${path2} are identical`
-                : `Differences between ${path1} and ${path2}:\n\n${diffs.join("\n\n")}`,
+              text: resultText,
             },
           ],
         };
