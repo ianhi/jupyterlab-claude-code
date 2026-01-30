@@ -2224,11 +2224,21 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         destCells.insert(insertAt, copiedCells);
 
         const count = end_index - start_index + 1;
+        // Build summary of what was copied
+        const cellSummaries: string[] = [];
+        for (let i = 0; i < copiedCells.length; i++) {
+          const cell = copiedCells[i];
+          const type = cell.get("cell_type") || "code";
+          const source = cell.get("source")?.toString() || "";
+          const preview = getCodePreview(source, 50);
+          cellSummaries.push(`  [${insertAt + i}] ${type}: ${preview}`);
+        }
+
         return {
           content: [
             {
               type: "text",
-              text: `Copied ${count} cell(s) from ${source_path}[${start_index}:${end_index}] to ${dest_path} at index ${insertAt}`,
+              text: `Copied ${count} cell(s) from ${source_path}[${start_index}:${end_index}] to ${dest_path} at index ${insertAt}:\n${cellSummaries.join("\n")}`,
             },
           ],
         };
@@ -2289,11 +2299,21 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
           sourceCells.insert(adjustedDest, cellsToMove);
 
+          // Build summary of what was moved
+          const cellSummaries: string[] = [];
+          for (let i = 0; i < cellsToMove.length; i++) {
+            const cell = cellsToMove[i];
+            const type = cell.get("cell_type") || "code";
+            const source = cell.get("source")?.toString() || "";
+            const preview = getCodePreview(source, 50);
+            cellSummaries.push(`  [${adjustedDest + i}] ${type}: ${preview}`);
+          }
+
           return {
             content: [
               {
                 type: "text",
-                text: `Moved ${count} cell(s) from indices ${start_index}-${end_index} to index ${adjustedDest} in ${source_path}`,
+                text: `Moved ${count} cell(s) from indices ${start_index}-${end_index} to index ${adjustedDest} in ${source_path}:\n${cellSummaries.join("\n")}`,
               },
             ],
           };
@@ -2308,11 +2328,21 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           // Delete from source
           sourceCells.delete(start_index, count);
 
+          // Build summary of what was moved
+          const cellSummaries: string[] = [];
+          for (let i = 0; i < cellsToMove.length; i++) {
+            const cell = cellsToMove[i];
+            const type = cell.get("cell_type") || "code";
+            const source = cell.get("source")?.toString() || "";
+            const preview = getCodePreview(source, 50);
+            cellSummaries.push(`  [${dest_index + i}] ${type}: ${preview}`);
+          }
+
           return {
             content: [
               {
                 type: "text",
-                text: `Moved ${count} cell(s) from ${source_path}[${start_index}:${end_index}] to ${dest_path} at index ${dest_index}`,
+                text: `Moved ${count} cell(s) from ${source_path}[${start_index}:${end_index}] to ${dest_path} at index ${dest_index}:\n${cellSummaries.join("\n")}`,
               },
             ],
           };
