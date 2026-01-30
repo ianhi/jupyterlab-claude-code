@@ -1004,6 +1004,146 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           required: ["path"],
         },
       },
+      {
+        name: "get_cell_metadata",
+        description:
+          "Get metadata from one or more cells, including tags.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: {
+              type: "string",
+              description: "Notebook path",
+            },
+            index: {
+              type: "number",
+              description: "Cell index. If end_index also provided, this is start of range.",
+            },
+            end_index: {
+              type: "number",
+              description: "End of range (inclusive). Omit for single cell.",
+            },
+          },
+          required: ["path", "index"],
+        },
+      },
+      {
+        name: "set_cell_metadata",
+        description:
+          "Set metadata on one or more cells. Merges with existing metadata (use null values to delete keys).",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: {
+              type: "string",
+              description: "Notebook path",
+            },
+            index: {
+              type: "number",
+              description: "Cell index. If end_index also provided, this is start of range.",
+            },
+            end_index: {
+              type: "number",
+              description: "End of range (inclusive). Omit for single cell.",
+            },
+            metadata: {
+              type: "object",
+              description: "Metadata to set/merge. Use null values to delete keys.",
+            },
+          },
+          required: ["path", "index", "metadata"],
+        },
+      },
+      {
+        name: "add_cell_tags",
+        description:
+          "Add tags to one or more cells. Common tags: 'skip-execution', 'hide-input', 'hide-output', 'parameters' (papermill).",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: {
+              type: "string",
+              description: "Notebook path",
+            },
+            index: {
+              type: "number",
+              description: "Cell index. If end_index also provided, this is start of range.",
+            },
+            end_index: {
+              type: "number",
+              description: "End of range (inclusive). Omit for single cell.",
+            },
+            tags: {
+              type: "array",
+              items: { type: "string" },
+              description: "Tags to add",
+            },
+          },
+          required: ["path", "index", "tags"],
+        },
+      },
+      {
+        name: "remove_cell_tags",
+        description:
+          "Remove tags from one or more cells.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: {
+              type: "string",
+              description: "Notebook path",
+            },
+            index: {
+              type: "number",
+              description: "Cell index. If end_index also provided, this is start of range.",
+            },
+            end_index: {
+              type: "number",
+              description: "End of range (inclusive). Omit for single cell.",
+            },
+            tags: {
+              type: "array",
+              items: { type: "string" },
+              description: "Tags to remove",
+            },
+          },
+          required: ["path", "index", "tags"],
+        },
+      },
+      {
+        name: "get_notebook_metadata",
+        description:
+          "Get notebook-level metadata (kernelspec, language_info, custom fields).",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: {
+              type: "string",
+              description: "Notebook path",
+            },
+          },
+          required: ["path"],
+        },
+      },
+      {
+        name: "set_notebook_metadata",
+        description:
+          "Set notebook-level metadata. Merges with existing metadata.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: {
+              type: "string",
+              description: "Notebook path",
+            },
+            metadata: {
+              type: "object",
+              description: "Metadata to set/merge",
+            },
+          },
+          required: ["path", "metadata"],
+        },
+      },
     ],
   };
 });
@@ -2326,6 +2466,296 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             ],
           };
         }
+      }
+
+      case "get_cell_metadata": {
+        const { path, index, end_index } = args as {
+          path: string;
+          index: number;
+          end_index?: number;
+        };
+
+        const sessions = await listNotebookSessions();
+        const session = sessions.find((s) => s.path === path);
+
+        const { doc } = await connectToNotebook(path, session?.kernelId);
+        const cells = doc.getArray("cells");
+
+        const endIdx = end_index ?? index;
+        if (index < 0 || endIdx >= cells.length || index > endIdx) {
+          throw new Error(`Invalid range [${index}, ${endIdx}]. Notebook has ${cells.length} cells.`);
+        }
+
+        const results: any[] = [];
+        for (let i = index; i <= endIdx; i++) {
+          const cell = cells.get(i) as Y.Map<any>;
+          const metadata = cell.get("metadata");
+          const metadataJson = metadata instanceof Y.Map ? metadata.toJSON() : (metadata || {});
+          results.push({
+            index: i,
+            metadata: metadataJson,
+            tags: metadataJson.tags || [],
+          });
+        }
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: results.length === 1
+                ? `Cell ${index} metadata:\n${JSON.stringify(results[0].metadata, null, 2)}`
+                : `Metadata for cells ${index}-${endIdx}:\n${JSON.stringify(results, null, 2)}`,
+            },
+          ],
+        };
+      }
+
+      case "set_cell_metadata": {
+        const { path, index, end_index, metadata } = args as {
+          path: string;
+          index: number;
+          end_index?: number;
+          metadata: Record<string, any>;
+        };
+
+        const sessions = await listNotebookSessions();
+        const session = sessions.find((s) => s.path === path);
+
+        const { doc } = await connectToNotebook(path, session?.kernelId);
+        const cells = doc.getArray("cells");
+
+        const endIdx = end_index ?? index;
+        if (index < 0 || endIdx >= cells.length || index > endIdx) {
+          throw new Error(`Invalid range [${index}, ${endIdx}]. Notebook has ${cells.length} cells.`);
+        }
+
+        for (let i = index; i <= endIdx; i++) {
+          const cell = cells.get(i) as Y.Map<any>;
+          let cellMetadata = cell.get("metadata");
+
+          if (!(cellMetadata instanceof Y.Map)) {
+            cellMetadata = new Y.Map();
+            cell.set("metadata", cellMetadata);
+          }
+
+          // Merge metadata
+          for (const [key, value] of Object.entries(metadata)) {
+            if (value === null) {
+              cellMetadata.delete(key);
+            } else if (Array.isArray(value)) {
+              const arr = new Y.Array();
+              arr.push(value);
+              cellMetadata.set(key, arr);
+            } else if (typeof value === "object") {
+              const map = new Y.Map();
+              for (const [k, v] of Object.entries(value)) {
+                map.set(k, v);
+              }
+              cellMetadata.set(key, map);
+            } else {
+              cellMetadata.set(key, value);
+            }
+          }
+        }
+
+        const count = endIdx - index + 1;
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Updated metadata on ${count} cell(s) (${index}${endIdx !== index ? `-${endIdx}` : ""})`,
+            },
+          ],
+        };
+      }
+
+      case "add_cell_tags": {
+        const { path, index, end_index, tags } = args as {
+          path: string;
+          index: number;
+          end_index?: number;
+          tags: string[];
+        };
+
+        const sessions = await listNotebookSessions();
+        const session = sessions.find((s) => s.path === path);
+
+        const { doc } = await connectToNotebook(path, session?.kernelId);
+        const cells = doc.getArray("cells");
+
+        const endIdx = end_index ?? index;
+        if (index < 0 || endIdx >= cells.length || index > endIdx) {
+          throw new Error(`Invalid range [${index}, ${endIdx}]. Notebook has ${cells.length} cells.`);
+        }
+
+        for (let i = index; i <= endIdx; i++) {
+          const cell = cells.get(i) as Y.Map<any>;
+          let cellMetadata = cell.get("metadata");
+
+          if (!(cellMetadata instanceof Y.Map)) {
+            cellMetadata = new Y.Map();
+            cell.set("metadata", cellMetadata);
+          }
+
+          // Get or create tags array
+          let existingTags = cellMetadata.get("tags");
+          let tagsArray: string[];
+
+          if (existingTags instanceof Y.Array) {
+            tagsArray = existingTags.toJSON() as string[];
+          } else if (Array.isArray(existingTags)) {
+            tagsArray = existingTags;
+          } else {
+            tagsArray = [];
+          }
+
+          // Add new tags (avoid duplicates)
+          for (const tag of tags) {
+            if (!tagsArray.includes(tag)) {
+              tagsArray.push(tag);
+            }
+          }
+
+          // Set as Y.Array
+          const newTagsArray = new Y.Array();
+          newTagsArray.push(tagsArray);
+          cellMetadata.set("tags", newTagsArray);
+        }
+
+        const count = endIdx - index + 1;
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Added tags [${tags.join(", ")}] to ${count} cell(s) (${index}${endIdx !== index ? `-${endIdx}` : ""})`,
+            },
+          ],
+        };
+      }
+
+      case "remove_cell_tags": {
+        const { path, index, end_index, tags } = args as {
+          path: string;
+          index: number;
+          end_index?: number;
+          tags: string[];
+        };
+
+        const sessions = await listNotebookSessions();
+        const session = sessions.find((s) => s.path === path);
+
+        const { doc } = await connectToNotebook(path, session?.kernelId);
+        const cells = doc.getArray("cells");
+
+        const endIdx = end_index ?? index;
+        if (index < 0 || endIdx >= cells.length || index > endIdx) {
+          throw new Error(`Invalid range [${index}, ${endIdx}]. Notebook has ${cells.length} cells.`);
+        }
+
+        for (let i = index; i <= endIdx; i++) {
+          const cell = cells.get(i) as Y.Map<any>;
+          const cellMetadata = cell.get("metadata");
+
+          if (!(cellMetadata instanceof Y.Map)) continue;
+
+          let existingTags = cellMetadata.get("tags");
+          let tagsArray: string[];
+
+          if (existingTags instanceof Y.Array) {
+            tagsArray = existingTags.toJSON() as string[];
+          } else if (Array.isArray(existingTags)) {
+            tagsArray = existingTags;
+          } else {
+            continue; // No tags to remove
+          }
+
+          // Remove specified tags
+          tagsArray = tagsArray.filter((t) => !tags.includes(t));
+
+          // Set as Y.Array
+          const newTagsArray = new Y.Array();
+          newTagsArray.push(tagsArray);
+          cellMetadata.set("tags", newTagsArray);
+        }
+
+        const count = endIdx - index + 1;
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Removed tags [${tags.join(", ")}] from ${count} cell(s) (${index}${endIdx !== index ? `-${endIdx}` : ""})`,
+            },
+          ],
+        };
+      }
+
+      case "get_notebook_metadata": {
+        const { path } = args as { path: string };
+
+        const sessions = await listNotebookSessions();
+        const session = sessions.find((s) => s.path === path);
+
+        const { doc } = await connectToNotebook(path, session?.kernelId);
+        const meta = doc.getMap("meta");
+        const metadata = meta.get("metadata");
+
+        const metadataJson = metadata instanceof Y.Map ? metadata.toJSON() : (metadata || {});
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Notebook metadata for ${path}:\n${JSON.stringify(metadataJson, null, 2)}`,
+            },
+          ],
+        };
+      }
+
+      case "set_notebook_metadata": {
+        const { path, metadata } = args as {
+          path: string;
+          metadata: Record<string, any>;
+        };
+
+        const sessions = await listNotebookSessions();
+        const session = sessions.find((s) => s.path === path);
+
+        const { doc } = await connectToNotebook(path, session?.kernelId);
+        const meta = doc.getMap("meta");
+        const existingMetadata = meta.get("metadata");
+
+        let notebookMetadata: Y.Map<any>;
+        if (existingMetadata instanceof Y.Map) {
+          notebookMetadata = existingMetadata;
+        } else {
+          notebookMetadata = new Y.Map();
+          meta.set("metadata", notebookMetadata);
+        }
+
+        // Merge metadata
+        for (const [key, value] of Object.entries(metadata)) {
+          if (value === null) {
+            notebookMetadata.delete(key);
+          } else if (typeof value === "object" && !Array.isArray(value)) {
+            // For nested objects like kernelspec, create Y.Map
+            const map = new Y.Map();
+            for (const [k, v] of Object.entries(value)) {
+              map.set(k, v);
+            }
+            notebookMetadata.set(key, map);
+          } else {
+            notebookMetadata.set(key, value);
+          }
+        }
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Updated notebook metadata for ${path}`,
+            },
+          ],
+        };
       }
 
       default:

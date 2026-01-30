@@ -66,6 +66,12 @@ No token in config - just paste your JupyterLab URL when connecting.
 | `execute_cell` | Execute a cell, show outputs in JupyterLab |
 | `execute_range` | Execute multiple cells in sequence |
 | `execute_code` | Execute code (optionally as new cell) |
+| `get_cell_metadata` | Get metadata/tags for cell(s) |
+| `set_cell_metadata` | Set metadata for cell(s) |
+| `add_cell_tags` | Add tags to cell(s) |
+| `remove_cell_tags` | Remove tags from cell(s) |
+| `get_notebook_metadata` | Get notebook-level metadata |
+| `set_notebook_metadata` | Set notebook-level metadata |
 
 ### Context-Efficient Reading
 
