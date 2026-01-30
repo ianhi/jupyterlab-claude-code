@@ -6,6 +6,11 @@ import {
   getCellId,
   resolveCellIndices,
   parseJupyterUrl,
+  generateUnifiedDiff,
+  formatOutputsAsText,
+  extractOutputText,
+  updateCellOutputs,
+  type ExecutionResult,
 } from "./helpers.js";
 
 describe("extractSource", () => {
@@ -43,6 +48,26 @@ describe("extractSource", () => {
     cell.set("source", ["a\n", "b"]);
     expect(extractSource(cell)).toBe("a\nb");
   });
+
+  it("converts non-string truthy values to string", () => {
+    expect(extractSource({ source: 123 })).toBe("123");
+  });
+
+  it("returns empty string for falsy source values", () => {
+    expect(extractSource({ source: 0 })).toBe("");
+    expect(extractSource({ source: false })).toBe("");
+    expect(extractSource({ source: null })).toBe("");
+  });
+
+  it("returns empty string for empty source", () => {
+    expect(extractSource({ source: "" })).toBe("");
+    expect(extractSource({ source: [] })).toBe("");
+  });
+
+  it("handles object with missing source property", () => {
+    expect(extractSource({})).toBe("");
+    expect(extractSource({ other: "value" })).toBe("");
+  });
 });
 
 describe("getCellType", () => {
@@ -66,6 +91,17 @@ describe("getCellType", () => {
     cell.set("cell_type", "markdown");
     expect(getCellType(cell)).toBe("markdown");
   });
+
+  it("defaults to 'code' if Y.Map has no cell_type", () => {
+    const doc = new Y.Doc();
+    const cell = doc.getMap("cell");
+    cell.set("source", "some code");
+    expect(getCellType(cell)).toBe("code");
+  });
+
+  it("handles raw cell type", () => {
+    expect(getCellType({ cell_type: "raw" })).toBe("raw");
+  });
 });
 
 describe("getCellId", () => {
@@ -83,6 +119,17 @@ describe("getCellId", () => {
     const cell = doc.getMap("cell");
     cell.set("id", "xyz-789");
     expect(getCellId(cell)).toBe("xyz-789");
+  });
+
+  it("returns undefined for object without id", () => {
+    expect(getCellId({ source: "code" })).toBeUndefined();
+  });
+
+  it("returns undefined for Y.Map without id", () => {
+    const doc = new Y.Doc();
+    const cell = doc.getMap("cell");
+    cell.set("source", "code");
+    expect(getCellId(cell)).toBeUndefined();
   });
 });
 
@@ -189,5 +236,381 @@ describe("parseJupyterUrl", () => {
   it("handles complex tokens with special characters", () => {
     const result = parseJupyterUrl("http://localhost:8888/lab?token=abc-123_XYZ");
     expect(result.token).toBe("abc-123_XYZ");
+  });
+
+  it("parses URL with custom port on https", () => {
+    const result = parseJupyterUrl("https://example.com:9999/lab?token=test");
+    expect(result).toEqual({
+      host: "example.com",
+      port: 9999,
+      token: "test",
+    });
+  });
+
+  it("parses URL with additional query parameters", () => {
+    const result = parseJupyterUrl("http://localhost:8888/lab?token=mytoken&other=param");
+    expect(result.token).toBe("mytoken");
+  });
+
+  it("parses 127.0.0.1 address", () => {
+    const result = parseJupyterUrl("http://127.0.0.1:8888/lab?token=local");
+    expect(result.host).toBe("127.0.0.1");
+    expect(result.port).toBe(8888);
+  });
+
+  it("throws for invalid URL", () => {
+    expect(() => parseJupyterUrl("not-a-url")).toThrow();
+  });
+
+  it("throws for empty token", () => {
+    expect(() => parseJupyterUrl("http://localhost:8888/lab?token="))
+      .toThrow("URL must include a token parameter");
+  });
+});
+
+describe("generateUnifiedDiff", () => {
+  it("returns '(no changes)' for identical strings", () => {
+    const result = generateUnifiedDiff("hello\nworld", "hello\nworld", "test.py");
+    expect(result).toBe("(no changes)");
+  });
+
+  it("shows single line change", () => {
+    const result = generateUnifiedDiff("hello", "goodbye", "test.py");
+    expect(result).toContain("--- test.py (before)");
+    expect(result).toContain("+++ test.py (after)");
+    expect(result).toContain("-hello");
+    expect(result).toContain("+goodbye");
+  });
+
+  it("shows added lines", () => {
+    const result = generateUnifiedDiff("line1", "line1\nline2", "test.py");
+    expect(result).toContain("+line2");
+  });
+
+  it("shows removed lines", () => {
+    const result = generateUnifiedDiff("line1\nline2", "line1", "test.py");
+    expect(result).toContain("-line2");
+  });
+
+  it("shows context around changes", () => {
+    const oldStr = "a\nb\nc\nd\ne";
+    const newStr = "a\nb\nX\nd\ne";
+    const result = generateUnifiedDiff(oldStr, newStr, "test.py");
+    expect(result).toContain(" b");  // context before
+    expect(result).toContain("-c");
+    expect(result).toContain("+X");
+    expect(result).toContain(" d");  // context after
+  });
+
+  it("handles multiple changes", () => {
+    const oldStr = "a\nb\nc\nd\ne\nf";
+    const newStr = "X\nb\nc\nd\nY\nf";
+    const result = generateUnifiedDiff(oldStr, newStr, "test.py");
+    expect(result).toContain("-a");
+    expect(result).toContain("+X");
+    expect(result).toContain("-e");
+    expect(result).toContain("+Y");
+  });
+
+  it("handles empty old string", () => {
+    const result = generateUnifiedDiff("", "new content", "test.py");
+    expect(result).toContain("+new content");
+  });
+
+  it("handles empty new string", () => {
+    const result = generateUnifiedDiff("old content", "", "test.py");
+    expect(result).toContain("-old content");
+  });
+
+  it("handles unicode characters", () => {
+    const result = generateUnifiedDiff("hello 世界", "hello 🌍", "test.py");
+    expect(result).toContain("-hello 世界");
+    expect(result).toContain("+hello 🌍");
+  });
+
+  it("handles trailing newlines", () => {
+    const result = generateUnifiedDiff("line1\n", "line1\nline2\n", "test.py");
+    expect(result).toContain("+line2");
+  });
+
+  it("handles only whitespace changes", () => {
+    const result = generateUnifiedDiff("  indented", "    indented", "test.py");
+    expect(result).toContain("-  indented");
+    expect(result).toContain("+    indented");
+  });
+
+  it("uses correct filename in header", () => {
+    const result = generateUnifiedDiff("a", "b", "path/to/notebook.ipynb");
+    expect(result).toContain("--- path/to/notebook.ipynb (before)");
+    expect(result).toContain("+++ path/to/notebook.ipynb (after)");
+  });
+});
+
+describe("formatOutputsAsText", () => {
+  it("returns empty string for empty outputs", () => {
+    expect(formatOutputsAsText([])).toBe("");
+    expect(formatOutputsAsText(null as any)).toBe("");
+    expect(formatOutputsAsText(undefined as any)).toBe("");
+  });
+
+  it("formats stream output", () => {
+    const outputs = [{ output_type: "stream", text: "Hello, World!\n" }];
+    expect(formatOutputsAsText(outputs)).toBe("Hello, World!\n");
+  });
+
+  it("formats execute_result output", () => {
+    const outputs = [{
+      output_type: "execute_result",
+      data: { "text/plain": "42" }
+    }];
+    expect(formatOutputsAsText(outputs)).toBe("42");
+  });
+
+  it("formats display_data output", () => {
+    const outputs = [{
+      output_type: "display_data",
+      data: { "text/plain": "<Figure size 640x480>" }
+    }];
+    expect(formatOutputsAsText(outputs)).toBe("<Figure size 640x480>");
+  });
+
+  it("formats error output", () => {
+    const outputs = [{
+      output_type: "error",
+      ename: "ValueError",
+      evalue: "invalid literal"
+    }];
+    expect(formatOutputsAsText(outputs)).toBe("ValueError: invalid literal");
+  });
+
+  it("combines multiple outputs", () => {
+    const outputs = [
+      { output_type: "stream", text: "Loading..." },
+      { output_type: "execute_result", data: { "text/plain": "Done" } }
+    ];
+    expect(formatOutputsAsText(outputs)).toBe("Loading...Done");
+  });
+});
+
+describe("extractOutputText", () => {
+  it("returns empty string for null/undefined", () => {
+    expect(extractOutputText(null)).toBe("");
+    expect(extractOutputText(undefined)).toBe("");
+  });
+
+  it("extracts stream text", () => {
+    expect(extractOutputText({ output_type: "stream", text: "hello" })).toBe("hello");
+  });
+
+  it("extracts execute_result text/plain", () => {
+    expect(extractOutputText({
+      output_type: "execute_result",
+      data: { "text/plain": "result" }
+    })).toBe("result");
+  });
+
+  it("extracts display_data text/plain", () => {
+    expect(extractOutputText({
+      output_type: "display_data",
+      data: { "text/plain": "display" }
+    })).toBe("display");
+  });
+
+  it("formats error as ename: evalue", () => {
+    expect(extractOutputText({
+      output_type: "error",
+      ename: "TypeError",
+      evalue: "cannot add str and int"
+    })).toBe("TypeError: cannot add str and int");
+  });
+
+  it("returns empty for missing data", () => {
+    expect(extractOutputText({ output_type: "execute_result", data: {} })).toBe("");
+  });
+});
+
+describe("updateCellOutputs", () => {
+  function createExecutionResult(
+    overrides: Partial<ExecutionResult> = {}
+  ): ExecutionResult {
+    return {
+      status: "ok",
+      executionCount: 1,
+      outputs: [],
+      text: "",
+      images: [],
+      html: [],
+      ...overrides,
+    };
+  }
+
+  it("sets execution_count on the cell", () => {
+    const doc = new Y.Doc();
+    const cell = doc.getMap("cell");
+    const result = createExecutionResult({ executionCount: 42 });
+
+    updateCellOutputs(cell, result);
+
+    expect(cell.get("execution_count")).toBe(42);
+  });
+
+  it("creates outputs Y.Array if not present", () => {
+    const doc = new Y.Doc();
+    const cell = doc.getMap("cell");
+    const result = createExecutionResult({
+      outputs: [{ output_type: "stream", name: "stdout", text: "hello" }],
+    });
+
+    updateCellOutputs(cell, result);
+
+    const outputs = cell.get("outputs") as Y.Array<any>;
+    expect(outputs).toBeInstanceOf(Y.Array);
+    expect(outputs.length).toBe(1);
+  });
+
+  it("clears existing outputs before adding new ones", () => {
+    const doc = new Y.Doc();
+    const cell = doc.getMap("cell");
+    const existingOutputs = new Y.Array();
+    const oldOutput = new Y.Map();
+    oldOutput.set("output_type", "stream");
+    existingOutputs.push([oldOutput]);
+    cell.set("outputs", existingOutputs);
+
+    const result = createExecutionResult({
+      outputs: [{ output_type: "execute_result", data: { "text/plain": "new" } }],
+    });
+
+    updateCellOutputs(cell, result);
+
+    const outputs = cell.get("outputs") as Y.Array<any>;
+    expect(outputs.length).toBe(1);
+    const output = outputs.get(0);
+    expect(output.get("output_type")).toBe("execute_result");
+  });
+
+  it("handles stream output", () => {
+    const doc = new Y.Doc();
+    const cell = doc.getMap("cell");
+    const result = createExecutionResult({
+      outputs: [{ output_type: "stream", name: "stdout", text: "Hello, World!" }],
+    });
+
+    updateCellOutputs(cell, result);
+
+    const outputs = cell.get("outputs") as Y.Array<any>;
+    const output = outputs.get(0);
+    expect(output.get("output_type")).toBe("stream");
+    expect(output.get("name")).toBe("stdout");
+    expect(output.get("text")).toBe("Hello, World!");
+  });
+
+  it("handles execute_result with nested data object", () => {
+    const doc = new Y.Doc();
+    const cell = doc.getMap("cell");
+    const result = createExecutionResult({
+      outputs: [{
+        output_type: "execute_result",
+        execution_count: 5,
+        data: { "text/plain": "42", "text/html": "<b>42</b>" },
+      }],
+    });
+
+    updateCellOutputs(cell, result);
+
+    const outputs = cell.get("outputs") as Y.Array<any>;
+    const output = outputs.get(0);
+    expect(output.get("output_type")).toBe("execute_result");
+    expect(output.get("execution_count")).toBe(5);
+    const data = output.get("data");
+    expect(data).toBeInstanceOf(Y.Map);
+    expect(data.get("text/plain")).toBe("42");
+    expect(data.get("text/html")).toBe("<b>42</b>");
+  });
+
+  it("handles error output", () => {
+    const doc = new Y.Doc();
+    const cell = doc.getMap("cell");
+    const result = createExecutionResult({
+      status: "error",
+      outputs: [{
+        output_type: "error",
+        ename: "ValueError",
+        evalue: "invalid literal",
+        traceback: ["Traceback...", "  File...", "ValueError: invalid literal"],
+      }],
+    });
+
+    updateCellOutputs(cell, result);
+
+    const outputs = cell.get("outputs") as Y.Array<any>;
+    const output = outputs.get(0);
+    expect(output.get("output_type")).toBe("error");
+    expect(output.get("ename")).toBe("ValueError");
+    expect(output.get("evalue")).toBe("invalid literal");
+    // traceback is an array, stored as Y.Array
+    const traceback = output.get("traceback");
+    expect(traceback).toBeInstanceOf(Y.Array);
+  });
+
+  it("handles display_data output", () => {
+    const doc = new Y.Doc();
+    const cell = doc.getMap("cell");
+    const result = createExecutionResult({
+      outputs: [{
+        output_type: "display_data",
+        data: { "text/plain": "<Figure size 640x480>" },
+        metadata: {},
+      }],
+    });
+
+    updateCellOutputs(cell, result);
+
+    const outputs = cell.get("outputs") as Y.Array<any>;
+    const output = outputs.get(0);
+    expect(output.get("output_type")).toBe("display_data");
+    const data = output.get("data");
+    expect(data.get("text/plain")).toBe("<Figure size 640x480>");
+  });
+
+  it("handles multiple outputs", () => {
+    const doc = new Y.Doc();
+    const cell = doc.getMap("cell");
+    const result = createExecutionResult({
+      outputs: [
+        { output_type: "stream", name: "stdout", text: "Loading..." },
+        { output_type: "stream", name: "stdout", text: "Done\n" },
+        { output_type: "execute_result", data: { "text/plain": "Result" } },
+      ],
+    });
+
+    updateCellOutputs(cell, result);
+
+    const outputs = cell.get("outputs") as Y.Array<any>;
+    expect(outputs.length).toBe(3);
+    expect(outputs.get(0).get("text")).toBe("Loading...");
+    expect(outputs.get(1).get("text")).toBe("Done\n");
+    expect(outputs.get(2).get("data").get("text/plain")).toBe("Result");
+  });
+
+  it("handles null execution count", () => {
+    const doc = new Y.Doc();
+    const cell = doc.getMap("cell");
+    const result = createExecutionResult({ executionCount: null });
+
+    updateCellOutputs(cell, result);
+
+    expect(cell.get("execution_count")).toBeNull();
+  });
+
+  it("handles empty outputs array", () => {
+    const doc = new Y.Doc();
+    const cell = doc.getMap("cell");
+    const result = createExecutionResult({ outputs: [] });
+
+    updateCellOutputs(cell, result);
+
+    const outputs = cell.get("outputs") as Y.Array<any>;
+    expect(outputs.length).toBe(0);
   });
 });

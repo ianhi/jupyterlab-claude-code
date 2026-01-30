@@ -24,6 +24,10 @@ import {
   getCellId,
   resolveCellIndices,
   parseJupyterUrl,
+  generateUnifiedDiff,
+  updateCellOutputs,
+  type NotebookOutput,
+  type ExecutionResult,
 } from "./helpers.js";
 
 // Dynamic configuration - set via connect_jupyter tool
@@ -186,20 +190,6 @@ async function connectToNotebook(
 // Kernel execution
 // ============================================================================
 
-interface NotebookOutput {
-  output_type: "stream" | "execute_result" | "error" | "display_data";
-  [key: string]: any;
-}
-
-interface ExecutionResult {
-  status: "ok" | "error";
-  executionCount: number | null;
-  outputs: NotebookOutput[];
-  text: string;
-  images: { data: string; mimeType: string }[];  // Base64-encoded images
-  html: string[];  // HTML outputs (for rich reprs)
-}
-
 async function executeCode(
   kernelId: string,
   code: string
@@ -335,130 +325,6 @@ async function executeCode(
       reject(err);
     });
   });
-}
-
-// Generate a unified diff between two strings
-function generateUnifiedDiff(
-  oldStr: string,
-  newStr: string,
-  filename: string
-): string {
-  const oldLines = oldStr.split("\n");
-  const newLines = newStr.split("\n");
-
-  // Simple line-by-line diff
-  const diffLines: string[] = [];
-  diffLines.push(`--- ${filename} (before)`);
-  diffLines.push(`+++ ${filename} (after)`);
-
-  // Find changed regions
-  const maxLen = Math.max(oldLines.length, newLines.length);
-  let inChange = false;
-  let changeStart = 0;
-  const changes: { oldStart: number; oldLines: string[]; newLines: string[] }[] = [];
-  let currentOld: string[] = [];
-  let currentNew: string[] = [];
-
-  for (let i = 0; i <= maxLen; i++) {
-    const oldLine = i < oldLines.length ? oldLines[i] : undefined;
-    const newLine = i < newLines.length ? newLines[i] : undefined;
-
-    if (oldLine !== newLine) {
-      if (!inChange) {
-        inChange = true;
-        changeStart = i;
-        currentOld = [];
-        currentNew = [];
-      }
-      if (oldLine !== undefined) currentOld.push(oldLine);
-      if (newLine !== undefined) currentNew.push(newLine);
-    } else if (inChange) {
-      changes.push({ oldStart: changeStart, oldLines: currentOld, newLines: currentNew });
-      inChange = false;
-    }
-  }
-
-  if (inChange) {
-    changes.push({ oldStart: changeStart, oldLines: currentOld, newLines: currentNew });
-  }
-
-  // Format hunks
-  for (const change of changes) {
-    const contextStart = Math.max(0, change.oldStart - 2);
-    const oldEnd = change.oldStart + change.oldLines.length;
-    const newEnd = change.oldStart + change.newLines.length;
-
-    diffLines.push(
-      `@@ -${change.oldStart + 1},${change.oldLines.length} +${change.oldStart + 1},${change.newLines.length} @@`
-    );
-
-    // Add context before
-    for (let i = contextStart; i < change.oldStart && i < oldLines.length; i++) {
-      diffLines.push(` ${oldLines[i]}`);
-    }
-
-    // Add removed lines
-    for (const line of change.oldLines) {
-      diffLines.push(`-${line}`);
-    }
-
-    // Add added lines
-    for (const line of change.newLines) {
-      diffLines.push(`+${line}`);
-    }
-
-    // Add context after
-    const contextEnd = Math.min(oldLines.length, oldEnd + 2);
-    for (let i = oldEnd; i < contextEnd; i++) {
-      diffLines.push(` ${oldLines[i]}`);
-    }
-  }
-
-  if (changes.length === 0) {
-    return "(no changes)";
-  }
-
-  return diffLines.join("\n");
-}
-
-// Update a cell's outputs in the Y.Doc
-function updateCellOutputs(
-  cell: Y.Map<any>,
-  result: ExecutionResult
-): void {
-  cell.set("execution_count", result.executionCount);
-
-  let outputsArray = cell.get("outputs");
-  if (!(outputsArray instanceof Y.Array)) {
-    outputsArray = new Y.Array();
-    cell.set("outputs", outputsArray);
-  }
-
-  // Clear existing outputs
-  if (outputsArray.length > 0) {
-    outputsArray.delete(0, outputsArray.length);
-  }
-
-  // Add new outputs as Y.Maps
-  for (const output of result.outputs) {
-    const outputMap = new Y.Map();
-    for (const [key, value] of Object.entries(output)) {
-      if (Array.isArray(value)) {
-        const arr = new Y.Array();
-        arr.push(value);
-        outputMap.set(key, arr);
-      } else if (typeof value === "object" && value !== null) {
-        const map = new Y.Map();
-        for (const [k, v] of Object.entries(value)) {
-          map.set(k, v);
-        }
-        outputMap.set(key, map);
-      } else {
-        outputMap.set(key, value);
-      }
-    }
-    outputsArray.push([outputMap]);
-  }
 }
 
 // ============================================================================
