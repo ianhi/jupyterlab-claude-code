@@ -551,6 +551,10 @@ async function openSyncedProvider(
       sessionId: session.sessionId,
       token: config.token,
     },
+    // y-websocket defaults to the global WebSocket, which doesn't exist on
+    // Node < 22. Supply the `ws` polyfill so RTC works regardless of Node
+    // version rather than crashing with "WebSocket is not defined".
+    WebSocketPolyfill: WebSocket as unknown as typeof globalThis.WebSocket,
   });
 
   // Wait for sync BEFORE setting awareness (ensures proper broadcast)
