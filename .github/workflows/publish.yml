@@ -25,6 +25,12 @@ jobs:
 
       - name: Run tests
         run: npm run test
+        # The collab-persistence integration test needs a real
+        # jupyter-collaboration server (uv). It already ran for real against a
+        # live server when this commit landed on main via test.yml, so skip it
+        # here to keep the publish path fast and server-free.
+        env:
+          SKIP_COLLAB_INTEGRATION: '1'
 
   publish:
     name: Publish to npm
