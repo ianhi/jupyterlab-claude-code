@@ -24,9 +24,15 @@ src/
 │   ├── kernel-lsp.ts   # kernel (status/interrupt/restart), kernel_variables, diagnostics, hover, rename
 │   ├── collab.ts       # focus, history, changes, recover, snapshot, cell_locks, report_issue, troubleshoot
 │   └── guide.ts        # notebook_guide (on-demand best-practices doc)
-├── connection.ts   # Jupyter connection state, session management, kernel execution, forced save
+├── connection.ts   # Jupyter connection state, session mgmt, kernel exec, forced save;
+│                   #   getNotebookConnection() is THE gate — self-heals a desynced socket
+│                   #   or throws, so no tool ever edits an un-persisting room
+├── persistence.ts  # verifyPersistedToDisk(): force-save + round-trip disk==room check
+│                   #   (backs save_notebook's honest "verified" and troubleshoot)
+├── validate-args.ts # Strict tool-arg validation (rejects unknown/missing, recurses arrays)
+├── version.ts      # Real server version, read from package.json
 ├── schemas.ts      # All 44 tool schema definitions
-├── helpers.ts      # Utilities (cell extraction, diffing, output formatting, ANSI stripping)
+├── helpers.ts      # Utilities (cell extraction, diffing, sync/peer checks, content signature)
 ├── notebook-fs.ts  # Filesystem backend (read/write .ipynb)
 ├── kernel-client.ts # Long-lived per-kernel WS; run state machine + retention
 ├── run-store.ts    # Bounded disk cache of handed-off run outputs (host-side)

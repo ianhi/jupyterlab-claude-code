@@ -673,33 +673,37 @@ export function checkHumanFocus(
  * edits — the exact vicious cycle we're defending against. The durable escape
  * hatch is the save_notebook tool, which forces a *verified* write.
  */
-export function getPeerWarning(provider: any): string | null {
-  // y-websocket exposes `synced` (initial sync done) and `wsconnected`.
-  const synced = provider?.synced === true && provider?.wsconnected !== false;
-  if (!synced) {
-    return (
-      "\n\n⚠ This notebook is NOT currently synced to JupyterLab (collab socket " +
-      "disconnected). Your edit is in the local buffer and may not have reached the " +
-      "server. Do NOT edit the .ipynb file directly to save it — a direct file write is " +
-      "reverted by jupyter-collaboration and destroys in-room edits. Re-check with " +
-      "get_notebook_content once reconnected, then use save_notebook to force a verified save."
-    );
-  }
+/**
+ * Whether a y-websocket provider is currently connected AND synced to the
+ * server room. `synced` means the initial state exchange completed; `wsconnected`
+ * guards against a socket that has since dropped. A false result means a local
+ * edit would sit in an un-flushed buffer rather than reaching the server — which
+ * is why `getNotebookConnection` refuses to hand back a connection in this state.
+ */
+export function isProviderSynced(provider: any): boolean {
+  return provider?.synced === true && provider?.wsconnected !== false;
+}
 
+/** Count remote clients (browser tabs) present in the room besides this MCP. */
+export function countPeers(provider: any): number {
   const awareness = provider?.awareness;
+  if (!awareness) return 0;
   let others = 0;
-  if (awareness) {
-    const myClientId = awareness.clientID;
-    for (const clientId of awareness.getStates().keys()) {
-      if (clientId !== myClientId) others++;
-    }
+  for (const clientId of awareness.getStates().keys()) {
+    if (clientId !== awareness.clientID) others++;
   }
-  if (others > 0) return null;
-  return (
-    "\n\n⚠ No browser peers connected to this notebook room — the edit reached the " +
-    "server room, but disk autosave may not be running without a peer. Call save_notebook " +
-    "to force a verified write to disk. Do NOT edit the .ipynb directly — that reverts the room."
-  );
+  return others;
+}
+
+/**
+ * Order-sensitive signature of a notebook's cells (type + source only), for
+ * comparing a live room against the on-disk copy. Ignores outputs/metadata so
+ * execution state doesn't create false mismatches. Accepts either Y.Map cells
+ * (live room) or plain JSON cells (disk), since extractSource/getCellType handle
+ * both.
+ */
+export function contentSignature(cells: any[]): string {
+  return JSON.stringify(cells.map((c) => [getCellType(c), extractSource(c)]));
 }
 
 /**

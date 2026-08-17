@@ -9,7 +9,7 @@ import {
   truncatedCellId,
 } from "../helpers.js";
 import { readNotebook, resolveNotebookPath, writeNotebook } from "../notebook-fs.js";
-import { connectToNotebook, isJupyterConnected, listNotebookSessions } from "../connection.js";
+import { getNotebookConnection, isJupyterConnected, listNotebookSessions } from "../connection.js";
 
 export const handlers: Record<string, (args: Record<string, unknown>) => Promise<ToolResult>> = {
   "cell_metadata": async (args) => {
@@ -72,7 +72,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
     const sessions = await listNotebookSessions();
     const session = sessions.find((s) => s.path === path);
 
-    const { doc } = await connectToNotebook(path, session?.kernelId);
+    const { doc } = await getNotebookConnection(path, session?.kernelId);
     const cells = doc.getArray("cells");
 
     const effectiveIndicesJup = cell_ids && cell_ids.length > 0
@@ -191,7 +191,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
       const sessions = await listNotebookSessions();
       const session = sessions.find((s) => s.path === path);
 
-      const { doc } = await connectToNotebook(path, session?.kernelId);
+      const { doc } = await getNotebookConnection(path, session?.kernelId);
       const cells = doc.getArray("cells");
 
       const matches: any[] = [];
@@ -281,7 +281,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
     const sessions = await listNotebookSessions();
     const session = sessions.find((s) => s.path === path);
 
-    const { doc } = await connectToNotebook(path, session?.kernelId);
+    const { doc } = await getNotebookConnection(path, session?.kernelId);
     const cells = doc.getArray("cells");
 
     const effectiveIndicesJup = cell_ids && cell_ids.length > 0
@@ -394,7 +394,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
     const sessions = await listNotebookSessions();
     const session = sessions.find((s) => s.path === path);
 
-    const { doc } = await connectToNotebook(path, session?.kernelId);
+    const { doc } = await getNotebookConnection(path, session?.kernelId);
     const meta = doc.getMap("meta");
 
     if (isSet) {

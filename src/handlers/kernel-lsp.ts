@@ -15,7 +15,7 @@ import {
   lspStatus,
   getLanguageServerForFile,
   listNotebookSessions,
-  connectToNotebook,
+  getNotebookConnection,
   closeKernelClient,
   executeCode,
   apiFetch,
@@ -291,7 +291,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
       const sessions = await listNotebookSessions();
       sessionForKernel = sessions.find((s) => s.path === path);
 
-      const { doc } = await connectToNotebook(path, sessionForKernel?.kernelId);
+      const { doc } = await getNotebookConnection(path, sessionForKernel?.kernelId);
       const cells = doc.getArray("cells");
 
       let resolvedCellIndex = cell_index;
@@ -464,7 +464,7 @@ except SyntaxError as e:
     const sessions = await listNotebookSessions();
     const session = sessions.find((s) => s.path === path);
 
-    const { doc } = await connectToNotebook(path, session?.kernelId);
+    const { doc } = await getNotebookConnection(path, session?.kernelId);
     const cells = doc.getArray("cells");
 
     if (cell_index < 0 || cell_index >= cells.length) {
@@ -619,7 +619,7 @@ del _target, _result_parts
     // Jupyter mode — read cells from Yjs, do rename, apply edits back
     const sessions = await listNotebookSessions();
     const session = sessions.find((s) => s.path === path);
-    const { doc } = await connectToNotebook(path, session?.kernelId);
+    const { doc } = await getNotebookConnection(path, session?.kernelId);
     const yCells = doc.getArray("cells");
 
     // Build cell array for renameSymbol
