@@ -13,8 +13,8 @@ import {
   apiFetch,
   listNotebookSessions,
   connectedNotebooks,
-  saveNotebook,
 } from "../connection.js";
+import { verifyPersistedToDisk } from "../persistence.js";
 import { readdir, stat, mkdir, rename as fsRename } from "node:fs/promises";
 import { join, dirname } from "node:path";
 
@@ -292,26 +292,47 @@ export const handlers: Record<
       };
     }
 
-    const { status } = await saveNotebook(path);
-    if (status === "success") {
-      return {
-        content: [{ type: "text", text: `Saved '${path}' to disk (verified).` }],
-      };
+    // Force the save AND prove it: read the file back through the server and
+    // compare it to the live room. "The server said success" is not enough —
+    // the collab-desync reports show a save can succeed against a room that is
+    // not the one persisted to this file.
+    const check = await verifyPersistedToDisk(path);
+
+    if (!check.diskExists) {
+      throw new Error(
+        `Save of '${path}' could NOT be verified: the connected server does not serve this ` +
+          `file (Contents API 404). You are almost certainly pointed at a different server than ` +
+          `the one that owns this notebook. Reconnect to the correct server and retry.`
+      );
     }
-    if (status === "skipped") {
+
+    if (check.persisted) {
       return {
         content: [
           {
             type: "text",
-            text: `Save of '${path}' was skipped by the server (a save was already in progress, or there were no changes to write). The room content is up to date.`,
+            text:
+              `Saved '${path}' — VERIFIED on disk (${check.roomCells} cells match the live room).\n` +
+              `Server path: ${check.serverPath} (last_modified ${check.lastModified}).`,
           },
         ],
       };
     }
-    // "failed" or anything unexpected → surface as a hard error (provably not persisted).
+
+    // Forced save returned, but disk still doesn't match the room: split-brain.
+    // The edits are NOT reaching this file. Fail hard with everything needed to
+    // diagnose it.
     throw new Error(
-      `Save of '${path}' FAILED server-side (status=${status}). The edits are NOT on disk. ` +
-        `Do not edit the .ipynb directly (that reverts the room). Check the JupyterLab server logs.`
+      `Save of '${path}' is NOT verified — the file on disk does NOT match your edits even ` +
+        `after a forced save (server save status: ${check.saveStatus}).\n` +
+        `This means the room you are editing is not the one persisted to this file (SPLIT-BRAIN). ` +
+        `Almost always a second/overlapping JupyterLab server, or a server whose root_dir differs ` +
+        `from where you are checking.\n` +
+        `The server persists this room to: ${check.serverPath} (relative to the server's root_dir; ` +
+        `a kernel's os.getcwd() may resolve a different file).\n` +
+        `Fix: run ONE JupyterLab server per directory and ensure Claude and the browser use the ` +
+        `SAME server URL. Do NOT edit the .ipynb directly (that reverts the room). ` +
+        `Run troubleshoot('${path}') for a full diagnosis.`
     );
   },
 

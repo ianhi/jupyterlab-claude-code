@@ -8,9 +8,11 @@ import {
   resolveCellId,
   generateUnifiedDiff,
   formatTimeRemaining,
-  extractSource,
-  getCellType,
+  countPeers,
+  isProviderSynced,
 } from "../helpers.js";
+import { verifyPersistedToDisk } from "../persistence.js";
+import { VERSION } from "../version.js";
 import {
   readNotebook,
   writeNotebook,
@@ -20,10 +22,9 @@ import {
 import {
   isJupyterConnected,
   listNotebookSessions,
-  connectToNotebook,
+  getNotebookConnection,
   getConfig,
   apiFetch,
-  saveNotebook,
   lspStatus,
   rtcAvailable,
 } from "../connection.js";
@@ -108,7 +109,7 @@ export function buildIssueDraft(r: {
     "## Context",
     `- Tool: ${r.tool_name ?? "n/a"}`,
     `- Notebook path: ${r.path ?? "n/a"}`,
-    `- jupyterlab-collab-mcp version: ${fill}`,
+    `- jupyterlab-collab-mcp version: ${VERSION}`,
     `- JupyterLab / kernel: ${fill}`,
     "---"
   );
@@ -277,7 +278,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
 
     const sessions = await listNotebookSessions();
     const session = sessions.find((s) => s.path === path);
-    const { doc } = await connectToNotebook(path, session?.kernelId);
+    const { doc } = await getNotebookConnection(path, session?.kernelId);
     const cells = doc.getArray("cells");
 
     const newCell = new Y.Map();
@@ -634,7 +635,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
     const lines: string[] = [];
 
     // --- Connection health ---
-    lines.push("## Connection");
+    lines.push(`## Connection (jupyterlab-collab-mcp v${VERSION})`);
     if (!isJupyterConnected()) {
       lines.push(
         "✗ Not connected to JupyterLab. Run connect_jupyter with your lab URL+token first.",
@@ -699,69 +700,62 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
       lines.push(`? Kernel: session lookup failed (${e.message}).`);
     }
 
-    // Live room sync + peers + round-trip persistence check
-    let docSig: string | null = null;
+    // Live room: sync + peers. getNotebookConnection self-heals a dropped
+    // socket, so reaching this without throwing means we hold a synced room.
+    let roomOpened = false;
     try {
-      const { doc, provider } = await connectToNotebook(path);
-      const synced = provider?.synced === true && provider?.wsconnected !== false;
+      const { doc, provider } = await getNotebookConnection(path);
+      const synced = isProviderSynced(provider);
       lines.push(
         synced
           ? "✓ Sync: connected and synced to the server room."
-          : "✗ Sync: NOT synced (socket disconnected) — edits sit in the local buffer and may not reach the server."
+          : "✗ Sync: NOT synced (socket disconnected) — an edit would sit in a local buffer, not reach the server."
       );
       if (!synced) flags.push("Provider not synced: an edit right now is not confirmed on the server.");
 
-      const awareness = provider?.awareness;
-      let peers = 0;
-      if (awareness) {
-        for (const id of awareness.getStates().keys()) if (id !== awareness.clientID) peers++;
-      }
+      const peers = countPeers(provider);
       lines.push(
         peers > 0
-          ? `✓ Peers: ${peers} other client(s) in the room (e.g. your browser tab).`
-          : "· Peers: none besides this MCP — disk autosave may not run without a peer, and you can't see edits live."
+          ? `✓ Peers: ${peers} browser tab(s) viewing this room live.`
+          : "· Peers: none besides this MCP (nobody has the notebook open right now — normal for headless editing; you'll see edits when you open/refresh the tab on THIS server)."
       );
-      if (peers === 0) flags.push("No browser peer: open the notebook in JupyterLab on THIS server to collaborate live.");
 
-      const cells = doc.getArray("cells");
-      docSig = contentSignature([...cells]);
-      lines.push(`· Room content: ${cells.length} cells.`);
+      lines.push(`· Room content: ${doc.getArray("cells").length} cells.`);
+      roomOpened = true;
     } catch (e: any) {
-      lines.push(`✗ Sync: could not connect to the room (${e.message}).`);
-      flags.push("Could not open the collaboration room — edits would not sync.");
+      lines.push(`✗ Sync: could not open the collaboration room (${e.message}).`);
+      flags.push("Could not open the collaboration room — edits would not sync or persist.");
     }
 
-    // Forced save + disk-vs-room round trip (the split-brain detector)
-    if (diskExists && docSig !== null) {
+    // Forced save + disk-vs-room round trip: the authoritative "will it be there
+    // when I come back to the tab?" check. verifyPersistedToDisk saves the room
+    // and reads it back through the server (which resolves the path against its
+    // own root_dir), so a mismatch here is a genuine split-brain / root mismatch.
+    if (diskExists && roomOpened) {
       try {
-        const { status } = await saveNotebook(path);
+        const check = await verifyPersistedToDisk(path);
         lines.push(
-          status === "success"
+          check.saveStatus === "success"
             ? "✓ Forced save: server reported success."
-            : status === "skipped"
+            : check.saveStatus === "skipped"
               ? "· Forced save: skipped (already up to date / save in progress)."
-              : `✗ Forced save: FAILED (status=${status}) — edits are NOT reaching disk.`
+              : `✗ Forced save: FAILED (status=${check.saveStatus}) — edits are NOT reaching disk.`
         );
-        if (status === "failed") flags.push("save_notebook failed: edits are not persisting to disk.");
-
-        // Re-read disk and compare sources+types with the room.
-        const res = await apiFetch(`/api/contents/${encodeURIComponent(path)}?content=1`);
-        if (res.ok) {
-          const nb = await res.json();
-          const diskCells = nb?.content?.cells ?? [];
-          const diskSig = contentSignature(diskCells);
-          if (diskSig === docSig) {
-            lines.push("✓ Round-trip: disk matches the room — edits persist to THIS file. Healthy.");
-          } else {
-            lines.push(
-              "🛑 Round-trip: disk does NOT match the room even after a forced save."
-            );
-            flags.push(
-              "SPLIT-BRAIN: the room you are editing is not the one saved to this file. " +
-                "Almost always a second/overlapping jupyter server. Ensure ONE server per directory " +
-                "and that Claude + the browser use the SAME server URL."
-            );
-          }
+        lines.push(
+          `· Server persists this room to: ${check.serverPath ?? path} ` +
+            `(relative to the server's root_dir; a kernel's os.getcwd() may resolve a different file — ` +
+            `compare against os.getcwd() if a kernel read disagrees).`
+        );
+        if (check.persisted) {
+          lines.push("✓ Round-trip: disk matches the room — edits persist to THIS file. Healthy.");
+        } else {
+          lines.push("🛑 Round-trip: disk does NOT match the room even after a forced save.");
+          flags.push(
+            "SPLIT-BRAIN: the room you are editing is not the one saved to this file. " +
+              "Almost always a second/overlapping JupyterLab server, or a server whose root_dir " +
+              "differs from where you are checking. Run ONE server per directory and ensure Claude " +
+              "and the browser use the SAME server URL."
+          );
         }
       } catch (e: any) {
         lines.push(`? Forced save / round-trip: ${e.message}`);
@@ -780,12 +774,3 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
     return { content: [{ type: "text", text: lines.join("\n") }] };
   },
 };
-
-/** Order-sensitive signature of a notebook's cells (type + source only), for
- * comparing a live room against the on-disk copy. Ignores outputs/metadata so
- * execution state doesn't create false mismatches. */
-function contentSignature(cells: any[]): string {
-  return JSON.stringify(
-    cells.map((c) => [getCellType(c), extractSource(c)])
-  );
-}

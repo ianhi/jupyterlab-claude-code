@@ -14,7 +14,6 @@ import {
   formatTimeRemaining,
   updateCellOutputs,
   buildExecutionContent,
-  getPeerWarning,
 } from "../helpers.js";
 import {
   readNotebook,
@@ -25,7 +24,7 @@ import {
 import {
   isJupyterConnected,
   listNotebookSessions,
-  connectToNotebook,
+  getNotebookConnection,
   executeCode,
   executeCodeWithHandoff,
   cacheExecution,
@@ -121,7 +120,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
     const sessions = await listNotebookSessions();
     const session = sessions.find((s) => s.path === path);
 
-    const { doc, provider } = await connectToNotebook(path, session?.kernelId);
+    const { doc } = await getNotebookConnection(path, session?.kernelId);
     const cells = doc.getArray("cells");
 
     // Resolve cell_id to "insert after" position
@@ -181,15 +180,13 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
         });
         if (outcome.kind === "handoff") {
           registerHandoffTarget(outcome.runId, path, newCellId);
-          const warn = getPeerWarning(provider);
           return {
             content: [
               {
                 type: "text",
                 text:
                   `✓ Inserted cell at index ${insertIndex} (id: ${newId}) in ${path}\n` +
-                  formatHandoffMessage(outcome.runId, handoff_after_ms, outcome.partial.text) +
-                  (warn ?? ""),
+                  formatHandoffMessage(outcome.runId, handoff_after_ms, outcome.partial.text),
               },
             ],
           };
@@ -199,8 +196,6 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
         const executionId = cacheExecution(path, { text: result.text, images: result.images, cellIndex: insertIndex, cellId: newCellId });
         const content = buildExecutionContent(result, `Inserted and executed cell at index ${insertIndex} (id: ${newId}) in ${path}\n\nOutput:\n`, { max_images, include_images });
         content[0].text += `\n(execution_id: ${executionId} — use filter_output to refine)`;
-        const warn = getPeerWarning(provider);
-        if (warn) content[0].text += warn;
         return { content };
       }
       const result = await executeCode(session.kernelId, source, timeoutMs);
@@ -208,8 +203,6 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
       const executionId = cacheExecution(path, { text: result.text, images: result.images, cellIndex: insertIndex, cellId: newCellId });
       const content = buildExecutionContent(result, `Inserted and executed cell at index ${insertIndex} (id: ${newId}) in ${path}\n\nOutput:\n`, { max_images, include_images });
       content[0].text += `\n(execution_id: ${executionId} — use filter_output to refine)`;
-      const warn = getPeerWarning(provider);
-      if (warn) content[0].text += warn;
       return { content };
     }
 
@@ -217,18 +210,19 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
       content: [
         {
           type: "text",
-          text: `Inserted ${cell_type} cell at index ${insertIndex} (id: ${newId}) in ${path}${getPeerWarning(provider) ?? ""}`,
+          text: `Inserted ${cell_type} cell at index ${insertIndex} (id: ${newId}) in ${path}`,
         },
       ],
     };
   },
 
   "update_cell": async (args) => {
-    const { path, index, cell_id, source, force = false, execute, timeout, max_images, include_images, show_diff = false, handoff_after_ms, client_name } = args as {
+    const { path, index, cell_id, source, cell_type, force = false, execute, timeout, max_images, include_images, show_diff = false, handoff_after_ms, client_name } = args as {
       path: string;
       index?: number;
       cell_id?: string;
       source: string;
+      cell_type?: "code" | "markdown";
       force?: boolean;
       execute?: boolean;
       timeout?: number;
@@ -260,6 +254,14 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
 
       const oldSource = extractSource(notebook.cells[resolvedIndex]);
       notebook.cells[resolvedIndex].source = source;
+      if (cell_type && cell_type !== getCellType(notebook.cells[resolvedIndex])) {
+        const target = notebook.cells[resolvedIndex];
+        target.cell_type = cell_type;
+        if (cell_type === "code") {
+          if (!target.outputs) target.outputs = [];
+          if (target.execution_count === undefined) target.execution_count = null;
+        }
+      }
       await writeNotebook(resolved, notebook);
 
       const cellIdStr = truncatedCellId(notebook.cells[resolvedIndex]);
@@ -281,7 +283,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
     const sessions = await listNotebookSessions();
     const session = sessions.find((s) => s.path === path);
 
-    const { doc, provider } = await connectToNotebook(path, session?.kernelId);
+    const { doc, provider } = await getNotebookConnection(path, session?.kernelId);
     const cells = doc.getArray("cells");
 
     let resolvedIndex = index;
@@ -333,6 +335,13 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
       } else {
         cell.set("source", new Y.Text(source));
       }
+      if (cell_type && cell_type !== (cell.get("cell_type") || "code")) {
+        cell.set("cell_type", cell_type);
+        if (cell_type === "code") {
+          if (!cell.get("outputs")) cell.set("outputs", new Y.Array());
+          if (!cell.has("execution_count")) cell.set("execution_count", null);
+        }
+      }
     }
 
     const cellIdStr = truncatedCellId(cell);
@@ -365,7 +374,6 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
           if (fullCellId) {
             registerHandoffTarget(outcome.runId, path, fullCellId);
           }
-          const warn = getPeerWarning(provider);
           let prefix = `✓ Updated cell ${resolvedIndex}${cellIdStr ? ` (${cellIdStr})` : ""} in ${path}`;
           if (show_diff) {
             const diff = generateUnifiedDiff(oldSource, source, `${path}:cell[${resolvedIndex}]`);
@@ -377,8 +385,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
                 type: "text",
                 text:
                   `${prefix}\n` +
-                  formatHandoffMessage(outcome.runId, handoff_after_ms, outcome.partial.text) +
-                  (warn ?? ""),
+                  formatHandoffMessage(outcome.runId, handoff_after_ms, outcome.partial.text),
               },
             ],
           };
@@ -397,8 +404,6 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
         const executionId = cacheExecution(path, { text: result.text, images: result.images, cellIndex: resolvedIndex, cellId: fullCellIdStr });
         const content = buildExecutionContent(result, prefix, { max_images, include_images });
         content[0].text += `\n(execution_id: ${executionId} — use filter_output to refine)`;
-        const warn = getPeerWarning(provider);
-        if (warn) content[0].text += warn;
         return { content };
       }
 
@@ -418,8 +423,6 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
       const executionId = cacheExecution(path, { text: result.text, images: result.images, cellIndex: resolvedIndex, cellId: fullCellIdStr });
       const content = buildExecutionContent(result, prefix, { max_images, include_images });
       content[0].text += `\n(execution_id: ${executionId} — use filter_output to refine)`;
-      const warn = getPeerWarning(provider);
-      if (warn) content[0].text += warn;
       return { content };
     }
 
@@ -433,7 +436,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
       content: [
         {
           type: "text",
-          text: `Updated cell ${resolvedIndex}${cellIdStr ? ` (${cellIdStr})` : ""} in ${path}\n\n${truncateDiff(diff)}${getPeerWarning(provider) ?? ""}`,
+          text: `Updated cell ${resolvedIndex}${cellIdStr ? ` (${cellIdStr})` : ""} in ${path}\n\n${truncateDiff(diff)}`,
         },
       ],
     };
@@ -490,7 +493,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
     const sessions = await listNotebookSessions();
     const session = sessions.find((s) => s.path === path);
 
-    const { doc, provider } = await connectToNotebook(path, session?.kernelId);
+    const { doc } = await getNotebookConnection(path, session?.kernelId);
     const cells = doc.getArray("cells");
 
     // Validate all indices first
@@ -557,7 +560,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
       content: [
         {
           type: "text",
-          text: `Updated ${updates.length} cells in ${path}\n\n${diffs.join("\n\n")}${getPeerWarning(provider) ?? ""}`,
+          text: `Updated ${updates.length} cells in ${path}\n\n${diffs.join("\n\n")}`,
         },
       ],
     };
@@ -632,7 +635,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
     const sessions = await listNotebookSessions();
     const session = sessions.find((s) => s.path === path);
 
-    const { doc, provider } = await connectToNotebook(path, session?.kernelId);
+    const { doc } = await getNotebookConnection(path, session?.kernelId);
     const cells = doc.getArray("cells");
 
     const results: string[] = [];
@@ -693,7 +696,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
       content: [
         {
           type: "text",
-          text: `Inserted ${inserts.length} cells in ${path}\n${results.join("\n")}${getPeerWarning(provider) ?? ""}`,
+          text: `Inserted ${inserts.length} cells in ${path}\n${results.join("\n")}`,
         },
       ],
     };
@@ -788,7 +791,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
       const sessions = await listNotebookSessions();
       const session = sessions.find((s) => s.path === path);
 
-      const { doc, provider } = await connectToNotebook(path, session?.kernelId);
+      const { doc } = await getNotebookConnection(path, session?.kernelId);
       const cells = doc.getArray("cells");
 
       // Resolve cell_ids to indices
@@ -823,7 +826,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
           content: [
             {
               type: "text",
-              text: `Deleted ${sortedIndices.length} cells (indices ${originalIndices.join(", ")}) from ${path}${getPeerWarning(provider) ?? ""}`,
+              text: `Deleted ${sortedIndices.length} cells (indices ${originalIndices.join(", ")}) from ${path}`,
             },
           ],
         };
@@ -859,7 +862,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
         content: [
           {
             type: "text",
-            text: `Deleted ${count} cells (indices ${start_index}-${end_index}) from ${path}${getPeerWarning(provider) ?? ""}`,
+            text: `Deleted ${count} cells (indices ${start_index}-${end_index}) from ${path}`,
           },
         ],
       };
@@ -913,7 +916,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
     const sessions = await listNotebookSessions();
     const session = sessions.find((s) => s.path === path);
 
-    const { doc, provider } = await connectToNotebook(path, session?.kernelId);
+    const { doc, provider } = await getNotebookConnection(path, session?.kernelId);
     const cells = doc.getArray("cells");
 
     let resolvedIndex = index;
@@ -983,7 +986,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
       content: [
         {
           type: "text",
-          text: `Deleted ${cellType} cell at index ${resolvedIndex}${cellIdStr ? ` (${cellIdStr})` : ""} in ${path}\n\n${deleteDiff}${getPeerWarning(provider) ?? ""}`,
+          text: `Deleted ${cellType} cell at index ${resolvedIndex}${cellIdStr ? ` (${cellIdStr})` : ""} in ${path}\n\n${deleteDiff}`,
         },
       ],
     };
@@ -1033,7 +1036,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
     const sessions = await listNotebookSessions();
     const session = sessions.find((s) => s.path === path);
 
-    const { doc, provider } = await connectToNotebook(path, session?.kernelId);
+    const { doc, provider } = await getNotebookConnection(path, session?.kernelId);
     const cells = doc.getArray("cells");
 
     let resolvedIndex = index;
@@ -1064,7 +1067,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
         content: [
           {
             type: "text",
-            text: `Cell ${resolvedIndex} is already type '${new_type}'${getPeerWarning(provider) ?? ""}`,
+            text: `Cell ${resolvedIndex} is already type '${new_type}'`,
           },
         ],
       };
@@ -1086,7 +1089,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
       content: [
         {
           type: "text",
-          text: `Changed cell ${resolvedIndex} from '${oldType}' to '${new_type}'${getPeerWarning(provider) ?? ""}`,
+          text: `Changed cell ${resolvedIndex} from '${oldType}' to '${new_type}'`,
         },
       ],
     };
@@ -1231,7 +1234,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
     const sourceSession = sessions.find((s) => s.path === source_path);
     const destSession = sessions.find((s) => s.path === dest_path);
 
-    const { doc: sourceDoc, provider: sourceProvider } = await connectToNotebook(source_path, sourceSession?.kernelId);
+    const { doc: sourceDoc } = await getNotebookConnection(source_path, sourceSession?.kernelId);
     const sourceCells = sourceDoc.getArray("cells");
 
     // Resolve source indices
@@ -1250,9 +1253,9 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
 
     const sameNotebook = source_path === dest_path;
 
-    const { doc: destDoc, provider: destProvider } = sameNotebook
-      ? { doc: sourceDoc, provider: sourceProvider }
-      : await connectToNotebook(dest_path, destSession?.kernelId);
+    const { doc: destDoc } = sameNotebook
+      ? { doc: sourceDoc }
+      : await getNotebookConnection(dest_path, destSession?.kernelId);
     const destCells = sameNotebook ? sourceCells : destDoc.getArray("cells");
 
     // Resolve destination
@@ -1353,14 +1356,11 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
       ? `index ${adjustedInsertAt} in ${source_path}`
       : `${dest_path} at index ${adjustedInsertAt}`;
     const idNote = !sameNotebook ? `\n\nNote: Cell IDs above are NEW destination IDs in ${dest_path} (source IDs are no longer valid).` : "";
-    // Surface a peer warning if either room has no browser peers, so the
-    // agent knows the user may not see the edit on at least one tab.
-    const peerWarn = getPeerWarning(destProvider) ?? (sameNotebook ? null : getPeerWarning(sourceProvider)) ?? "";
     return {
       content: [
         {
           type: "text",
-          text: `${operationPast} ${copiedCells.length} cell(s) from ${source_path} ${rangeLabel} to ${destLabel}:\n${cellSummaries.join("\n")}${idNote}${peerWarn}`,
+          text: `${operationPast} ${copiedCells.length} cell(s) from ${source_path} ${rangeLabel} to ${destLabel}:\n${cellSummaries.join("\n")}${idNote}`,
         },
       ],
     };

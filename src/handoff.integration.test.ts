@@ -10,7 +10,7 @@
  * Scope: covers (a) handler-level handoff handle and (b) notifier +
  * get_cell_run_output. The y-doc cell backfill path is exercised in
  * src/handoff-targets.test.ts — wiring a Y.Doc through a stubbed
- * connectToNotebook + listNotebookSessions adds significant fixture
+ * getNotebookConnection + listNotebookSessions adds significant fixture
  * weight for marginal coverage given the per-helper test.
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";

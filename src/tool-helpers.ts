@@ -5,7 +5,7 @@
  * repetition and keep the main index.ts focused on tool definitions.
  *
  * Note: The connection-related imports (isJupyterConnected, listNotebookSessions,
- * connectToNotebook, NotebookSession) are expected to be extracted from index.ts
+ * getNotebookConnection, NotebookSession) are expected to be extracted from index.ts
  * into a connection.ts module before this file can be used.
  */
 
@@ -24,7 +24,7 @@ import {
 import {
   isJupyterConnected,
   listNotebookSessions,
-  connectToNotebook,
+  getNotebookConnection,
   type NotebookSession,
 } from "./connection.js";
 
@@ -76,7 +76,7 @@ export async function getSessionWithKernel(
  * Combines the repeated pattern (~30 occurrences) of:
  *   const sessions = await listNotebookSessions();
  *   const session = sessions.find(s => s.path === path);
- *   const { doc, provider } = await connectToNotebook(path, session?.kernelId);
+ *   const { doc, provider } = await getNotebookConnection(path, session?.kernelId);
  *   const cells = doc.getArray("cells");
  */
 export async function connectAndGetCells(path: string): Promise<{
@@ -87,7 +87,7 @@ export async function connectAndGetCells(path: string): Promise<{
 }> {
   const sessions = await listNotebookSessions();
   const session = sessions.find((s) => s.path === path);
-  const { doc, provider } = await connectToNotebook(path, session?.kernelId);
+  const { doc, provider } = await getNotebookConnection(path, session?.kernelId);
   const cells = doc.getArray("cells");
   return { doc, provider, cells, session };
 }
@@ -127,7 +127,7 @@ export async function getNotebookCells(path: string): Promise<{
 
   const sessions = await listNotebookSessions();
   const session = sessions.find((s) => s.path === path);
-  const { doc, provider } = await connectToNotebook(path, session?.kernelId);
+  const { doc, provider } = await getNotebookConnection(path, session?.kernelId);
   const cells = doc.getArray("cells");
   return {
     mode: "jupyter",

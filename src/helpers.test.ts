@@ -18,47 +18,73 @@ import {
   formatTimeRemaining,
   stripAnsi,
   filterOutputText,
-  getPeerWarning,
+  isProviderSynced,
+  countPeers,
+  contentSignature,
   type ExecutionResult,
 } from "./helpers.js";
 
-describe("getPeerWarning (post-edit persistence gate)", () => {
-  const makeProvider = (opts: {
-    synced?: boolean;
-    wsconnected?: boolean;
-    peerIds?: number[];
-    myId?: number;
-  }) => ({
-    synced: opts.synced,
-    wsconnected: opts.wsconnected,
+describe("isProviderSynced", () => {
+  const provider = (synced?: boolean, wsconnected?: boolean) => ({ synced, wsconnected });
+
+  it("is true only when synced and the socket is up", () => {
+    expect(isProviderSynced(provider(true, true))).toBe(true);
+    // wsconnected undefined is treated as "not explicitly down" → still synced
+    expect(isProviderSynced(provider(true, undefined))).toBe(true);
+  });
+
+  it("is false when not synced or the socket dropped", () => {
+    expect(isProviderSynced(provider(false, true))).toBe(false);
+    expect(isProviderSynced(provider(true, false))).toBe(false);
+    expect(isProviderSynced(provider(undefined, undefined))).toBe(false);
+    expect(isProviderSynced(null)).toBe(false);
+  });
+});
+
+describe("countPeers", () => {
+  const provider = (myId: number, ids: number[]) => ({
     awareness: {
-      clientID: opts.myId ?? 1,
-      getStates: () => new Map((opts.peerIds ?? []).map((id) => [id, {}])),
+      clientID: myId,
+      getStates: () => new Map(ids.map((id) => [id, {}])),
     },
   });
 
-  it("warns about NOT synced when the socket is disconnected", () => {
-    const w = getPeerWarning(makeProvider({ synced: false, wsconnected: false, peerIds: [1, 2] }));
-    expect(w).toContain("NOT currently synced");
-    expect(w).toContain("save_notebook");
-    // must steer away from the fatal direct file write
-    expect(w).toContain("Do NOT edit the .ipynb");
+  it("counts remote clients, excluding this MCP", () => {
+    expect(countPeers(provider(1, [1, 2, 3]))).toBe(2);
+    expect(countPeers(provider(1, [1]))).toBe(0);
   });
 
-  it("returns null when synced with at least one other peer", () => {
-    const w = getPeerWarning(makeProvider({ synced: true, wsconnected: true, myId: 1, peerIds: [1, 2] }));
-    expect(w).toBeNull();
+  it("is 0 with no awareness", () => {
+    expect(countPeers({})).toBe(0);
+    expect(countPeers(null)).toBe(0);
+  });
+});
+
+describe("contentSignature", () => {
+  const jsonCell = (type: string, source: string) => ({ cell_type: type, source });
+
+  it("matches identical type+source regardless of outputs/metadata", () => {
+    const a = { cell_type: "code", source: "x=1", outputs: [{ text: "1" }], metadata: { a: 1 } };
+    const b = { cell_type: "code", source: "x=1", outputs: [], metadata: {} };
+    expect(contentSignature([a])).toBe(contentSignature([b]));
   });
 
-  it("warns about no browser peers when synced but alone", () => {
-    const w = getPeerWarning(makeProvider({ synced: true, wsconnected: true, myId: 1, peerIds: [1] }));
-    expect(w).toContain("No browser peers");
-    expect(w).toContain("save_notebook");
+  it("differs when source, type, or order differs", () => {
+    const c1 = jsonCell("code", "x=1");
+    const c2 = jsonCell("markdown", "hi");
+    expect(contentSignature([c1])).not.toBe(contentSignature([jsonCell("code", "x=2")]));
+    expect(contentSignature([c1])).not.toBe(contentSignature([jsonCell("markdown", "x=1")]));
+    expect(contentSignature([c1, c2])).not.toBe(contentSignature([c2, c1]));
   });
 
-  it("treats missing sync flag as not-synced (conservative)", () => {
-    const w = getPeerWarning(makeProvider({ peerIds: [1, 2] }));
-    expect(w).toContain("NOT currently synced");
+  it("equates a Y.Map room cell with its plain-JSON disk counterpart", () => {
+    const yCell = new Y.Map();
+    yCell.set("cell_type", "code");
+    yCell.set("source", new Y.Text("print(1)"));
+    // A Y.Map must be attached to a doc before its Y.Text resolves.
+    const doc = new Y.Doc();
+    doc.getArray("cells").insert(0, [yCell]);
+    expect(contentSignature([yCell])).toBe(contentSignature([jsonCell("code", "print(1)")]));
   });
 });
 

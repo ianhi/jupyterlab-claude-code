@@ -18,7 +18,7 @@ import {
 import {
   isJupyterConnected,
   listNotebookSessions,
-  connectToNotebook,
+  getNotebookConnection,
 } from "../connection.js";
 
 export const handlers: Record<string, (args: Record<string, unknown>) => Promise<ToolResult>> = {
@@ -136,7 +136,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
     const sessions = await listNotebookSessions();
     const session = sessions.find((s) => s.path === path);
 
-    const { doc } = await connectToNotebook(path, session?.kernelId);
+    const { doc } = await getNotebookConnection(path, session?.kernelId);
     const cells = doc.getArray("cells");
     const cellIndices = getCellIndicesToRead(cells);
 
@@ -200,7 +200,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
     const sessions = await listNotebookSessions();
     const session = sessions.find((s) => s.path === path);
 
-    const { doc } = await connectToNotebook(path, session?.kernelId);
+    const { doc } = await getNotebookConnection(path, session?.kernelId);
     const cells = doc.getArray("cells");
     const outline = buildOutline(
       Array.from({ length: cells.length }),
@@ -333,7 +333,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
     } else {
       const sessions = await listNotebookSessions();
       const session = sessions.find((s) => s.path === path);
-      const { doc } = await connectToNotebook(path, session?.kernelId);
+      const { doc } = await getNotebookConnection(path, session?.kernelId);
       const cells = doc.getArray("cells");
       matches = searchCells(
         Array.from({ length: cells.length }),
@@ -457,7 +457,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
     const sessions = await listNotebookSessions();
     const session = sessions.find((s) => s.path === path);
 
-    const { doc } = await connectToNotebook(path, session?.kernelId);
+    const { doc } = await getNotebookConnection(path, session?.kernelId);
     const cells = doc.getArray("cells");
 
     // Determine which cells to process
@@ -613,8 +613,8 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
     const session1 = sessions.find((s) => s.path === path1);
     const session2 = sessions.find((s) => s.path === path2);
 
-    const { doc: doc1 } = await connectToNotebook(path1, session1?.kernelId);
-    const { doc: doc2 } = await connectToNotebook(path2, session2?.kernelId);
+    const { doc: doc1 } = await getNotebookConnection(path1, session1?.kernelId);
+    const { doc: doc2 } = await getNotebookConnection(path2, session2?.kernelId);
 
     const cells1 = doc1.getArray("cells");
     const cells2 = doc2.getArray("cells");
@@ -710,7 +710,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
     const sessions = await listNotebookSessions();
     const session = sessions.find((s) => s.path === path);
 
-    const { doc, provider } = await connectToNotebook(path, session?.kernelId);
+    const { doc, provider } = await getNotebookConnection(path, session?.kernelId);
     const awareness = provider.awareness;
     const cells = doc.getArray("cells");
 

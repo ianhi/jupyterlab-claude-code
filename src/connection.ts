@@ -9,7 +9,7 @@ import WebSocket from "ws";
 import { WebsocketProvider } from "y-websocket";
 import * as Y from "yjs";
 import crypto from "node:crypto";
-import { type ExecutionResult } from "./helpers.js";
+import { type ExecutionResult, isProviderSynced } from "./helpers.js";
 import { KernelClient } from "./kernel-client.js";
 import { notifyHandoffComplete } from "./notifications.js";
 import { backfillRunOutputs } from "./handoff-targets.js";
@@ -429,14 +429,31 @@ const connectingNotebooks = new Map<
   Promise<{ doc: Y.Doc; provider: WebsocketProvider }>
 >();
 
-export function connectToNotebook(
+/**
+ * The single gate every RTC tool passes through to reach a notebook's live
+ * room. It guarantees the returned connection is *synced to the server* — never
+ * a stale local buffer. A cache hit whose socket has since dropped is given a
+ * brief window to resync and, failing that, is torn down and rebuilt. If a
+ * synced connection cannot be established, this throws rather than handing back
+ * a doc whose edits would silently never reach disk (the collab-desync bug).
+ * Centralizing the check here means callers — reads and edits alike — cannot
+ * accidentally operate on an un-persisting room.
+ */
+export async function getNotebookConnection(
   path: string,
   kernelId?: string
 ): Promise<{ doc: Y.Doc; provider: WebsocketProvider }> {
-  // Check cache
   const cached = connectedNotebooks.get(path);
   if (cached) {
-    return Promise.resolve(cached);
+    if (isProviderSynced(cached.provider)) return cached;
+    // Cached but desynced: the socket dropped after connect. Give y-websocket a
+    // short window to reconnect and flush on its own before we intervene — a
+    // transient blip should "just work" without discarding buffered edits.
+    if (await waitForSync(cached.provider, 3000)) return cached;
+    // Still not synced: the connection is unrecoverable (destroyed provider,
+    // dead/wrong server). Tear it down so the rebuild below starts clean; any
+    // edits it held never reached the server, so nothing persistable is lost.
+    evictNotebook(path);
   }
 
   // Coalesce with any connect already in flight for this same path.
@@ -448,6 +465,38 @@ export function connectToNotebook(
   });
   connectingNotebooks.set(path, promise);
   return promise;
+}
+
+/**
+ * Resolve true once the provider reports synced, or false after `timeoutMs`.
+ * Returns immediately if already synced.
+ */
+function waitForSync(provider: WebsocketProvider, timeoutMs: number): Promise<boolean> {
+  if (isProviderSynced(provider)) return Promise.resolve(true);
+  return new Promise<boolean>((resolve) => {
+    const done = (ok: boolean) => {
+      clearTimeout(timer);
+      provider.off("sync", onSync);
+      resolve(ok);
+    };
+    const onSync = (synced: boolean) => {
+      if (synced && isProviderSynced(provider)) done(true);
+    };
+    const timer = setTimeout(() => done(false), timeoutMs);
+    provider.on("sync", onSync);
+  });
+}
+
+/** Drop a cached notebook connection and destroy its provider/socket. */
+export function evictNotebook(path: string): void {
+  const entry = connectedNotebooks.get(path);
+  if (!entry) return;
+  connectedNotebooks.delete(path);
+  try {
+    entry.provider.destroy();
+  } catch {
+    /* ignore */
+  }
 }
 
 async function establishConnection(

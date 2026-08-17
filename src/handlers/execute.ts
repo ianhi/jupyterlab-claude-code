@@ -15,7 +15,7 @@ import {
   type OutputFilterOptions,
 } from "../helpers.js";
 import { readNotebook, writeNotebook, resolveNotebookPath } from "../notebook-fs.js";
-import { isJupyterConnected, listNotebookSessions, connectToNotebook, executeCode, executeCodeWithHandoff, findRun, listRuns, cacheExecution, getCachedExecution } from "../connection.js";
+import { isJupyterConnected, listNotebookSessions, getNotebookConnection, executeCode, executeCodeWithHandoff, findRun, listRuns, cacheExecution, getCachedExecution } from "../connection.js";
 import { registerHandoffTarget } from "../handoff-targets.js";
 import { MAX_RETAINED_RUNS, COMPLETED_RUN_TTL_MS } from "../kernel-client.js";
 import { loadPersistedRun } from "../run-store.js";
@@ -90,7 +90,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
       );
     }
 
-    const { doc } = await connectToNotebook(path, session.kernelId);
+    const { doc } = await getNotebookConnection(path, session.kernelId);
     const cells = doc.getArray("cells");
     const timeoutMs = Math.min(Math.max(timeout || 30000, 1000), 300000);
 
@@ -561,7 +561,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
     const sessions = await listNotebookSessions();
     const session = sessions.find((s) => s.path === path);
 
-    const { doc, provider } = await connectToNotebook(path, session?.kernelId);
+    const { doc, provider } = await getNotebookConnection(path, session?.kernelId);
     const cells = doc.getArray("cells");
 
     let resolvedIndex = index;
@@ -707,7 +707,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
     const sessions = await listNotebookSessions();
     const session = sessions.find((s) => s.path === path);
 
-    const { doc } = await connectToNotebook(path, session?.kernelId);
+    const { doc } = await getNotebookConnection(path, session?.kernelId);
     const cells = doc.getArray("cells");
 
     const effectiveIndicesJup = cell_ids && cell_ids.length > 0

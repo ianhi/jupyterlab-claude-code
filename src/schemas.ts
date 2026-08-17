@@ -323,6 +323,7 @@ export const toolSchemas = [
         index: { type: "number", description: "Cell index" },
         cell_id: { type: "string", description: "Cell ID (alternative to index)" },
         source: { type: "string", description: "New source code" },
+        cell_type: { type: "string", enum: ["code", "markdown"], description: "Optionally change the cell type at the same time. Omit to leave it unchanged." },
         force: { type: "boolean", description: "Override human-focus protection. Default: false" },
         execute: { type: "boolean", description: "Execute after update. Default: false" },
         timeout: { type: "number", description: "Execution timeout ms. Default: 30000" },

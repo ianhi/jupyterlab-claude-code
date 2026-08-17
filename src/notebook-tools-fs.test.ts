@@ -252,6 +252,31 @@ describe("insert/delete/update cells (filesystem)", () => {
     expect(reRead.cells.length).toBe(8);
   });
 
+  // issue #23 case 2: update_cell used to silently drop cell_type, leaving
+  // markdown prose sitting in a code cell (or vice-versa). It must now apply the
+  // type change. Pick whichever cell is markdown and convert it to code.
+  it("update_cell applies cell_type when changing a cell's content", async () => {
+    const path = await copyFixture("simple.ipynb", tmpDir);
+    const before = await readNotebook(path);
+    const mdIndex = before.cells.findIndex((c) => getCellType(c) === "markdown");
+    expect(mdIndex).toBeGreaterThanOrEqual(0);
+
+    const res = await cellWriteHandlers["update_cell"]({
+      path,
+      index: mdIndex,
+      source: "x = 42",
+      cell_type: "code",
+    });
+    expect(res.isError).not.toBe(true);
+
+    const after = await readNotebook(path);
+    expect(getCellType(after.cells[mdIndex])).toBe("code");
+    expect(extractSource(after.cells[mdIndex])).toBe("x = 42");
+    // code cells must gain the execution fields
+    expect(after.cells[mdIndex]).toHaveProperty("outputs");
+    expect(after.cells[mdIndex]).toHaveProperty("execution_count");
+  });
+
   it("deletes a cell", async () => {
     const path = await copyFixture("simple.ipynb", tmpDir);
     const nb = await readNotebook(path);
