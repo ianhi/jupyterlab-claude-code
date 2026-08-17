@@ -674,6 +674,20 @@ export function checkHumanFocus(
  * hatch is the save_notebook tool, which forces a *verified* write.
  */
 /**
+ * Default handoff threshold (ms) for execute paths, overridable via
+ * `JUPYTER_MCP_DEFAULT_HANDOFF_MS`. A run that exceeds this hands back a
+ * `run_id` instead of blocking the agent; a run that finishes under it returns
+ * inline. Set clear of the ~1–2s range of ordinary cells so normal work isn't
+ * handed off, while a genuinely slow cell never blocks the agent for a whole
+ * long `timeout`. Pass an explicit `handoff_after_ms` to override per call, or
+ * a value ≥ `timeout` to force blocking until completion.
+ */
+export function defaultHandoffMs(): number {
+  const v = Number(process.env.JUPYTER_MCP_DEFAULT_HANDOFF_MS);
+  return Number.isFinite(v) && v > 0 ? v : 10000;
+}
+
+/**
  * Whether a y-websocket provider is currently connected AND synced to the
  * server room. `synced` means the initial state exchange completed; `wsconnected`
  * guards against a socket that has since dropped. A false result means a local

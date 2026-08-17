@@ -14,6 +14,7 @@ import {
   formatTimeRemaining,
   updateCellOutputs,
   buildExecutionContent,
+  defaultHandoffMs,
 } from "../helpers.js";
 import {
   readNotebook,
@@ -173,10 +174,11 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
         );
       }
       const timeoutMs = Math.min(Math.max(timeout || 30000, 1000), 300000);
-      if (handoff_after_ms !== undefined) {
+      const handoffMs = handoff_after_ms ?? defaultHandoffMs();
+      if (handoffMs < timeoutMs) {
         const outcome = await executeCodeWithHandoff(session.kernelId, source, {
           timeoutMs,
-          handoffAfterMs: handoff_after_ms,
+          handoffAfterMs: handoffMs,
         });
         if (outcome.kind === "handoff") {
           registerHandoffTarget(outcome.runId, path, newCellId);
@@ -186,7 +188,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
                 type: "text",
                 text:
                   `✓ Inserted cell at index ${insertIndex} (id: ${newId}) in ${path}\n` +
-                  formatHandoffMessage(outcome.runId, handoff_after_ms, outcome.partial.text),
+                  formatHandoffMessage(outcome.runId, handoffMs, outcome.partial.text),
               },
             ],
           };
@@ -363,11 +365,12 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
         );
       }
       const timeoutMs = Math.min(Math.max(timeout || 30000, 1000), 300000);
+      const handoffMs = handoff_after_ms ?? defaultHandoffMs();
 
-      if (handoff_after_ms !== undefined) {
+      if (handoffMs < timeoutMs) {
         const outcome = await executeCodeWithHandoff(session.kernelId, source, {
           timeoutMs,
-          handoffAfterMs: handoff_after_ms,
+          handoffAfterMs: handoffMs,
         });
         if (outcome.kind === "handoff") {
           const fullCellId = getCellId(cell);
@@ -385,7 +388,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
                 type: "text",
                 text:
                   `${prefix}\n` +
-                  formatHandoffMessage(outcome.runId, handoff_after_ms, outcome.partial.text),
+                  formatHandoffMessage(outcome.runId, handoffMs, outcome.partial.text),
               },
             ],
           };
