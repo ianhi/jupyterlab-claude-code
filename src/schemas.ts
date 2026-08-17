@@ -64,7 +64,7 @@ export const toolSchemas = [
   {
     name: "save_notebook",
     description:
-      "Force a verified save of the notebook's live collaboration room to disk and report whether it persisted (success/skipped/failed). Use this to guarantee edits reach disk — NEVER edit the .ipynb file directly to 'save' it, as a direct file write is reverted by jupyter-collaboration and loses in-room edits.",
+      "Force a verified save of the notebook's live collaboration room to disk and report whether it persisted (success/skipped/failed). Use this to guarantee edits reach disk ÃÂ¢ÃÂÃÂ NEVER edit the .ipynb file directly to 'save' it, as a direct file write is reverted by jupyter-collaboration and loses in-room edits.",
     inputSchema: {
       type: "object",
       properties: {
@@ -290,7 +290,7 @@ export const toolSchemas = [
   {
     name: "insert_cell",
     description:
-      "Insert a cell. Set execute=true to run it immediately and return its output — a single-call, durable alternative to execute_code (code+output are saved in the notebook and visible to the human). Supports handoff_after_ms for long runs.",
+      "Insert a cell. Set execute=true to run it immediately and return its output ÃÂ¢ÃÂÃÂ a single-call, durable alternative to execute_code (code+output are saved in the notebook and visible to the human). Supports handoff_after_ms for long runs.",
     inputSchema: {
       type: "object",
       properties: {
@@ -300,13 +300,13 @@ export const toolSchemas = [
         source: { type: "string", description: "Cell source code" },
         cell_type: { type: "string", enum: ["code", "markdown"], description: "Default: code" },
         execute: { type: "boolean", description: "Execute after insert. Default: false" },
-        timeout: { type: "number", description: "Execution timeout ms. Default: 30000" },
+        timeout: { type: "number", description: "Max run lifetime ms (the agent does not block this long Ã¢ÂÂ see handoff_after_ms). Default: 30000" },
         max_images: { type: "number", description: "Max images to return" },
         include_images: { type: "boolean", description: "Return images. Default: true" },
         handoff_after_ms: {
           type: "number",
           description:
-            "If execution exceeds this many ms, return a run_id handle (with partial output) instead of waiting. Final result arrives via a push notification; fetch it with get_cell_run_output. Only used when execute=true.",
+            "If a run exceeds this many ms, hand back a run_id (with partial output) instead of blocking; the run keeps going in the background up to `timeout` and you fetch the result with get_cell_run_output (a push notification fires when it finishes). Defaults to ~10s (JUPYTER_MCP_DEFAULT_HANDOFF_MS) so a long `timeout` never blocks the agent; pass a value >= timeout to block until completion. Only used when execute=true.",
         },
         client_name: { type: "string", description: "Agent name for attribution. Default: 'claude-code'" },
       },
@@ -326,14 +326,14 @@ export const toolSchemas = [
         cell_type: { type: "string", enum: ["code", "markdown"], description: "Optionally change the cell type at the same time. Omit to leave it unchanged." },
         force: { type: "boolean", description: "Override human-focus protection. Default: false" },
         execute: { type: "boolean", description: "Execute after update. Default: false" },
-        timeout: { type: "number", description: "Execution timeout ms. Default: 30000" },
+        timeout: { type: "number", description: "Max run lifetime ms (the agent does not block this long Ã¢ÂÂ see handoff_after_ms). Default: 30000" },
         max_images: { type: "number", description: "Max images to return" },
         include_images: { type: "boolean", description: "Return images. Default: true" },
         show_diff: { type: "boolean", description: "Include source diff. Default: false" },
         handoff_after_ms: {
           type: "number",
           description:
-            "If execution exceeds this many ms, return a run_id handle (with partial output) instead of waiting. Final result arrives via a push notification; fetch it with get_cell_run_output. Only used when execute=true.",
+            "If a run exceeds this many ms, hand back a run_id (with partial output) instead of blocking; the run keeps going in the background up to `timeout` and you fetch the result with get_cell_run_output (a push notification fires when it finishes). Defaults to ~10s (JUPYTER_MCP_DEFAULT_HANDOFF_MS) so a long `timeout` never blocks the agent; pass a value >= timeout to block until completion. Only used when execute=true.",
         },
         client_name: { type: "string", description: "Agent name for attribution. Default: 'claude-code'" },
       },
@@ -459,13 +459,13 @@ export const toolSchemas = [
         cell_id: { type: "string", description: "Cell ID (single cell mode)" },
         end_index: { type: "number", description: "Last cell (inclusive) for range execution" },
         cell_ids: { type: "array", items: { type: "string" }, description: "Execute these cells in order" },
-        timeout: { type: "number", description: "Timeout ms (per cell in range). Default: 30000" },
+        timeout: { type: "number", description: "Max run lifetime ms per cell (the agent does not block this long â see handoff_after_ms). Default: 30000" },
         max_images: { type: "number", description: "Max images to return" },
         include_images: { type: "boolean", description: "Return images. Default: true" },
         handoff_after_ms: {
           type: "number",
           description:
-            "If execution exceeds this many ms, return a run_id handle (with partial output) instead of waiting. Final result arrives via a push notification; fetch it with get_cell_run_output.",
+            "If a run exceeds this many ms, hand back a run_id (with partial output) instead of blocking; the run keeps going in the background up to `timeout` and you fetch the result with get_cell_run_output (a push notification fires when it finishes). Defaults to ~10s (JUPYTER_MCP_DEFAULT_HANDOFF_MS) so a long `timeout` never blocks the agent; pass a value >= timeout to block until completion.",
         },
       },
       required: ["path"],
@@ -474,19 +474,19 @@ export const toolSchemas = [
   {
     name: "execute_code",
     description:
-      "Run throwaway code in the kernel without modifying the notebook — for quick probes whose output you don't need to keep. Output is NOT saved and only briefly retained. For anything worth keeping or showing a human, prefer insert_cell(execute=true): same single call, but code+output are saved in the notebook.",
+      "Run throwaway code in the kernel without modifying the notebook ÃÂ¢ÃÂÃÂ for quick probes whose output you don't need to keep. Output is NOT saved and only briefly retained. For anything worth keeping or showing a human, prefer insert_cell(execute=true): same single call, but code+output are saved in the notebook.",
     inputSchema: {
       type: "object",
       properties: {
         path: { type: "string", description: "Notebook path (identifies kernel)" },
         code: { type: "string", description: "Code to execute" },
-        timeout: { type: "number", description: "Timeout ms. Default: 30000" },
+        timeout: { type: "number", description: "Max run lifetime ms (the agent does not block this long — see handoff_after_ms). Default: 30000" },
         max_images: { type: "number", description: "Max images to return" },
         include_images: { type: "boolean", description: "Return images. Default: true" },
         handoff_after_ms: {
           type: "number",
           description:
-            "If execution exceeds this many ms, return a run_id handle (with partial output) instead of waiting. Final result arrives via a push notification; fetch it with get_cell_run_output.",
+            "If a run exceeds this many ms, hand back a run_id (with partial output) instead of blocking; the run keeps going in the background up to `timeout` and you fetch the result with get_cell_run_output (a push notification fires when it finishes). Defaults to ~10s (JUPYTER_MCP_DEFAULT_HANDOFF_MS) so a long `timeout` never blocks the agent; pass a value >= timeout to block until completion.",
         },
       },
       required: ["path", "code"],
@@ -495,7 +495,7 @@ export const toolSchemas = [
   {
     name: "get_cell_run_output",
     description:
-      "Fetch output for a run started by execute_cell/execute_code (typically one that handed off via handoff_after_ms). Works for runs still executing AND completed runs — also the right tool to call when a <channel source=\"jupyter\"> notification fires.",
+      "Fetch output for a run started by execute_cell/execute_code (typically one that handed off via handoff_after_ms). Works for runs still executing AND completed runs ÃÂ¢ÃÂÃÂ also the right tool to call when a <channel source=\"jupyter\"> notification fires.",
     inputSchema: {
       type: "object",
       properties: {
@@ -561,7 +561,7 @@ export const toolSchemas = [
   {
     name: "filter_output",
     description:
-      "Filter cached execution output with grep/head/tail. Use after execute_cell or execute_code — avoids re-executing.",
+      "Filter cached execution output with grep/head/tail. Use after execute_cell or execute_code ÃÂ¢ÃÂÃÂ avoids re-executing.",
     inputSchema: {
       type: "object",
       properties: {
@@ -785,7 +785,7 @@ export const toolSchemas = [
   {
     name: "notebook_guide",
     description:
-      "Best practices for working with notebooks via this server. Call this FIRST when starting notebook work (or when unsure which tool to use) — returns guidance on reading, editing, executing, collaborating, and troubleshooting. Optionally pass a topic to get just one section.",
+      "Best practices for working with notebooks via this server. Call this FIRST when starting notebook work (or when unsure which tool to use) ÃÂ¢ÃÂÃÂ returns guidance on reading, editing, executing, collaborating, and troubleshooting. Optionally pass a topic to get just one section.",
     inputSchema: {
       type: "object",
       properties: {

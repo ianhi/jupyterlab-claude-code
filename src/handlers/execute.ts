@@ -12,6 +12,7 @@ import {
   buildExecutionContent,
   checkHumanFocus,
   filterOutputText,
+  defaultHandoffMs,
   type OutputFilterOptions,
 } from "../helpers.js";
 import { readNotebook, writeNotebook, resolveNotebookPath } from "../notebook-fs.js";
@@ -93,6 +94,10 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
     const { doc } = await getNotebookConnection(path, session.kernelId);
     const cells = doc.getArray("cells");
     const timeoutMs = Math.min(Math.max(timeout || 30000, 1000), 300000);
+    // Hand off (return a run_id instead of blocking) once a run passes the
+    // handoff threshold — explicit, else the env-tunable default — so a long
+    // `timeout` never means a long block. Only when there's room under timeout.
+    const handoffMs = handoff_after_ms ?? defaultHandoffMs();
 
     // Range mode: if end_index or cell_ids is provided
     if (end_index !== undefined || (cell_ids && cell_ids.length > 0)) {
@@ -134,10 +139,10 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
         }
 
         try {
-          if (handoff_after_ms !== undefined) {
+          if (handoffMs < timeoutMs) {
             const outcome = await executeCodeWithHandoff(session.kernelId, source, {
               timeoutMs,
-              handoffAfterMs: handoff_after_ms,
+              handoffAfterMs: handoffMs,
             });
             if (outcome.kind === "handoff") {
               // Stop range execution at the first handoff — the agent should
@@ -157,8 +162,8 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
                   {
                     type: "text",
                     text:
-                      `Range execution paused at cell ${i} — handed off after ${handoff_after_ms}ms.\n` +
-                      formatHandoffMessage(outcome.runId, handoff_after_ms, outcome.partial.text) +
+                      `Range execution paused at cell ${i} — handed off after ${handoffMs}ms.\n` +
+                      formatHandoffMessage(outcome.runId, handoffMs, outcome.partial.text) +
                       `\n\nResults so far:\n${JSON.stringify(results, null, 2)}`,
                   },
                 ],
@@ -227,10 +232,10 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
     const cellIdStr = getCellId(cell);
     const source = extractSource(cell);
 
-    if (handoff_after_ms !== undefined) {
+    if (handoffMs < timeoutMs) {
       const outcome = await executeCodeWithHandoff(session.kernelId, source, {
         timeoutMs,
-        handoffAfterMs: handoff_after_ms,
+        handoffAfterMs: handoffMs,
       });
       if (outcome.kind === "handoff") {
         if (cellIdStr) {
@@ -240,7 +245,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
           content: [
             {
               type: "text",
-              text: formatHandoffMessage(outcome.runId, handoff_after_ms, outcome.partial.text),
+              text: formatHandoffMessage(outcome.runId, handoffMs, outcome.partial.text),
             },
           ],
         };
@@ -286,18 +291,22 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
     }
 
     const timeoutMs = Math.min(Math.max(timeout || 30000, 1000), 300000);
+    // Hand off (return a run_id instead of blocking) once a run passes the
+    // handoff threshold — explicit, else the env-tunable default — so a long
+    // `timeout` never means a long block. Only when there's room under timeout.
+    const handoffMs = handoff_after_ms ?? defaultHandoffMs();
 
-    if (handoff_after_ms !== undefined) {
+    if (handoffMs < timeoutMs) {
       const outcome = await executeCodeWithHandoff(session.kernelId, code, {
         timeoutMs,
-        handoffAfterMs: handoff_after_ms,
+        handoffAfterMs: handoffMs,
       });
       if (outcome.kind === "handoff") {
         return {
           content: [
             {
               type: "text",
-              text: formatHandoffMessage(outcome.runId, handoff_after_ms, outcome.partial.text),
+              text: formatHandoffMessage(outcome.runId, handoffMs, outcome.partial.text),
             },
           ],
         };

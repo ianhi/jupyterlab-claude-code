@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
 import * as Y from "yjs";
 import {
   extractSource,
@@ -21,8 +21,36 @@ import {
   isProviderSynced,
   countPeers,
   contentSignature,
+  defaultHandoffMs,
   type ExecutionResult,
 } from "./helpers.js";
+
+describe("defaultHandoffMs", () => {
+  const orig = process.env.JUPYTER_MCP_DEFAULT_HANDOFF_MS;
+  afterEach(() => {
+    if (orig === undefined) delete process.env.JUPYTER_MCP_DEFAULT_HANDOFF_MS;
+    else process.env.JUPYTER_MCP_DEFAULT_HANDOFF_MS = orig;
+  });
+
+  it("defaults to 10s — clear of the 1-2s range of ordinary cells", () => {
+    delete process.env.JUPYTER_MCP_DEFAULT_HANDOFF_MS;
+    expect(defaultHandoffMs()).toBe(10000);
+    // below the 30s default timeout, so execute paths hand off by default
+    expect(defaultHandoffMs()).toBeLessThan(30000);
+  });
+
+  it("honors a valid override", () => {
+    process.env.JUPYTER_MCP_DEFAULT_HANDOFF_MS = "3000";
+    expect(defaultHandoffMs()).toBe(3000);
+  });
+
+  it("ignores a non-positive or unparseable override", () => {
+    for (const bad of ["0", "-5", "abc", ""]) {
+      process.env.JUPYTER_MCP_DEFAULT_HANDOFF_MS = bad;
+      expect(defaultHandoffMs()).toBe(10000);
+    }
+  });
+});
 
 describe("isProviderSynced", () => {
   const provider = (synced?: boolean, wsconnected?: boolean) => ({ synced, wsconnected });
