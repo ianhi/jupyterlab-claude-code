@@ -4,6 +4,21 @@ All notable changes to the jupyterlab-collab-mcp.
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-08-17
+
+### Fixed
+- **Silent loss of notebook edits when the collaboration socket desynced** — edits could land in a Yjs room that wasn't the one persisted to the target file (a dropped collab socket buffering edits locally, or a split-brain / server-root mismatch), while every edit tool still returned success and `save_notebook` reported "verified". Sync is now enforced, not advisory: `getNotebookConnection` (renamed from `connectToNotebook`) validates sync on every cache hit, gives a dropped socket a brief window to recover, then evicts and rebuilds — or throws — so no tool can operate on an un-persisting room. `save_notebook` now force-saves and round-trips disk-vs-room, reporting `VERIFIED` only when the file on disk actually matches the live room, otherwise a hard error naming the server's persist path. Guarded by a new real-server integration test that reproduces the desync failure (proven red before the fix); also validated end-to-end against a proxied Coiled server.
+- **RTC crashed on Node < 22** — `y-websocket` reached for the global `WebSocket`, which is absent on Node 18/20 (both within the declared `engines: >=18`), so opening a room threw `WebSocket is not defined`. It now supplies the `ws` polyfill so real-time collaboration works across the whole supported Node range.
+- **`batch_update_cells` reported success while editing nothing, and `update_cell` dropped `cell_type`** — tool-argument validation now rejects unknown and missing parameters, including inside array items, instead of coercing them to `undefined` and emitting a false success. `update_cell` now applies `cell_type` when changing a cell. (#23)
+
+### Changed
+- **`troubleshoot` and `save_notebook` report the server's real persist path** and the `root_dir`-vs-kernel-`cwd` caveat, so a path mismatch (e.g. a proxied/Coiled server whose kernel `cwd` differs from the server root) is diagnosable instead of being misread as data loss.
+- **Removed the soft peer/desync warnings from edit responses** — persistence is now enforced by the connection gate, so headless editing (no browser tab open) just works and edits appear when the tab is reopened.
+
+### Added
+- **Server reports its real version** — `serverInfo.version`, `report_issue`, and `troubleshoot` now read the version from `package.json` instead of a hardcoded `0.1.0`. (#26)
+- **Real-server collaboration-persistence integration test** — spins up an actual `jupyter-collaboration` server and asserts an edit either persists to disk or fails loudly, never a false "verified".
+
 ## [0.14.0] - 2026-07-10
 
 ### Added
